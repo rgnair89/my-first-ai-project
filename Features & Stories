@@ -1,0 +1,80 @@
+# Product Requirements Document (PRD): Kidscover — Feature & User Story Breakdown
+
+**Author:** Rajasekharan Gopakumar
+**Document Status:** Draft (MVP Phase)
+
+---
+
+## Feature 1: User Authentication & Profile Management
+
+**Description:** Enabling secure access and personalization for parents and school administrators.
+
+### Frontend User Stories
+- **US1.1 (Parent/Admin):** As a user, I want to sign up and log in using my phone number (OTP), Google, Microsoft, or Email account so that I can securely access the app without remembering a new password.
+- **US1.2 (Parent/Admin):** As a user, I want to upload a profile picture or select a stock cartoon avatar so that I can personalize my account.
+- **US1.3 (Parent):** As a user, I want to manage my app settings (Dark Mode, Push Notifications, Biometric Login, Language) so that the app matches my device preferences.
+
+### Backend User Stories
+- **US1.4 (Backend):** As a system, I need to integrate with OAuth providers (Google, Microsoft) and an SMS gateway (for OTP) to authenticate users securely and generate session tokens.
+- **US1.5 (Backend):** As a system, I need to securely store user profile data (Name, Gender, Email, Phone, Encrypted Address Book) in the database and expose REST/GraphQL endpoints for the frontend to perform CRUD operations.
+
+---
+
+## Feature 2: Location-Based Dashboard & Commute Search
+
+**Description:** The core discovery engine utilizing real-world commute times rather than straight-line distance.
+
+### Frontend User Stories
+- **US2.1 (Parent):** As a parent, I want the app to automatically detect my location (falling back to address book, then last session, then manual entry) so that I immediately see schools relevant to my area.
+- **US2.2 (Parent):** As a parent, I want to see dashboard tiles showing the number of available schools, open admissions, and closed admissions in my area so that I understand the current landscape at a glance.
+- **US2.3 (Parent):** As a parent, I want to input my desired commute time and see an auto-calculated "Arrive By" time (e.g., 8:15 AM for an 8:30 AM start) so I know exactly when my child needs to leave home.
+- **US2.4 (Parent):** As a parent, I want to filter search results by educational board (CBSE, ICSE, etc.), school age, and Total Cost of Ownership (TCO) so that I only see viable options.
+
+### Backend User Stories
+- **US2.5 (Backend):** As a system, I need to query the Google Maps Distance Matrix API using the user's coordinates and the school's coordinates, factoring in morning traffic conditions, to return accurate commute times.
+- **US2.6 (Backend):** As a system, I need to aggregate fee data (tuition, transport, cafeteria, uniform, admission fees) from the database into a single TCO integer for the frontend to filter against.
+
+---
+
+## Feature 3: School Marketplace & Detail Pages
+
+**Description:** Comprehensive data presentation for individual schools and comparison tools.
+
+### Frontend User Stories
+- **US3.1 (Parent):** As a parent, I want to view a detailed school profile showing enrollment numbers, board results, university placements, facilities, and aggregated Google ratings so that I can evaluate the school's quality.
+- **US3.2 (Parent):** As a parent, I want to see a full breakdown of the fees that make up the Total Cost of Ownership (TCO) so I am not surprised by hidden charges.
+- **US3.3 (Parent):** As a parent, I want to select up to 4 schools and view them in a side-by-side comparison matrix covering all attributes.
+
+### Backend User Stories
+- **US3.4 (Backend):** As a system, I need an endpoint that delivers full school profile data, structured facility tags, and aggregated rating scores to the client.
+- **US3.5 (Backend):** As a system, I need a scheduled background job to pull and update aggregated public review scores (e.g., Google Places API) for listed schools.
+
+---
+
+## Feature 4: Admissions & Enquiry Gateway
+
+**Description:** The hybrid application system connecting parents to schools.
+
+### Frontend User Stories
+- **US4.1 (Parent):** As a parent viewing a "Partner School," I want to fill out a standard Kidscover admission form (Parent details, Ward details, Address) directly in the app.
+- **US4.2 (Parent):** As a parent viewing a "Non-Partner School," I want a button that redirects me to their official admission portal.
+- **US4.3 (School Admin):** As a school admissions user, I want a dashboard to view incoming applications submitted via the Kidscover standard form.
+
+### Backend User Stories
+- **US4.4 (Backend):** As a system, I need to process submitted Kidscover standard forms and trigger a webhook/API call to securely transmit the payload to the specific Partner School's CRM system.
+- **US4.5 (Backend):** As a system, I need to log the outbound clicks to Non-Partner schools for internal analytics and lead-tracking purposes.
+
+---
+
+## Feature 5: Ticketing & Notifications
+
+**Description:** Secure, two-way communication channel.
+
+### Frontend User Stories
+- **US5.1 (Parent):** As a parent, I want to open a chat/ticket with a partner school's admission team to ask questions without sharing my personal phone number.
+- **US5.2 (School Admin):** As a school admissions user, I want to reply to parent tickets within a dedicated portal interface.
+- **US5.3 (Parent):** As a parent, I want to receive push notifications when a school replies to my ticket or when there is an update on my admission application.
+
+### Backend User Stories
+- **US5.4 (Backend):** As a system, I need a secure messaging schema to store chat tickets, associating them with a masked parent ID and the specific school ID.
+- **US5.5 (Backend):** As a system, I need to integrate with a Push Notification service (e.g., Firebase Cloud Messaging / APNs) to trigger alerts based on database status changes in the ticketing or admissions table.
