@@ -1,0 +1,78 @@
+# Product Requirements Document (PRD): Kidscover
+
+**Document Status:** Draft (MVP Phase)
+**Author:** Rajasekharan Gopakumar
+**Target Launch:** Web & Mobile App (iOS/Android)
+**Last Updated:** September 2026
+
+---
+
+## 1. Product Overview
+
+### 1.1 Problem Statement
+
+School discovery and admission data is highly fragmented. Parents struggle to acquire reliable information regarding actual morning commute times, true financial costs (Total Cost of Ownership), and accurate admission windows. Current market solutions act as lead-generation platforms that optimize for school advertising rather than serving as decision-support tools for parents.
+
+### 1.2 Product Vision
+
+Kidscover is a privacy-first, mobile-native marketplace designed to empower parents with accurate, transparent data to screen and shortlist K-12 schools. By indexing real-world commute parameters and unified financial metrics, Kidscover reduces the friction of the school discovery journey while offering partnered schools a streamlined, high-intent lead pipeline.
+
+---
+
+## 2. User Personas
+
+**The Parent (Primary User – 85% Traffic)**
+- Needs to quickly filter schools by realistic commute times, specific educational boards (e.g., CBSE, ICSE, IGCSE), and true out-of-pocket costs.
+- Desires anonymity during the initial screening process to avoid spam.
+
+**The Partner School Admissions Team (Secondary User – 15% Traffic)**
+- Requires a simple web/mobile interface to receive and manage structured admission enquiries and applications without navigating away from standard workflows.
+- Needs the ability to map Kidscover's standard application form payload directly into their existing CRM/ERP systems.
+
+---
+
+## 3. Key Features & Functional Requirements
+
+### 3.1 Authentication & User Profiles (P0)
+- **SSO Integration:** Registration via Google, Microsoft, Email, or Phone Number (OTP).
+- **Profile Management:** Configurable First Name, Last Name, Gender, Email, Phone, Address Book, Profile Picture (upload or stock avatar).
+- **App Settings:** Support for Dark Mode, Push Notifications toggle, Biometric Login enablement, and Language Localization.
+
+### 3.2 Location-Based Dashboard & Search (P0)
+- **Location Fallback Logic:** The app must determine the primary search area strictly in this order: Mobile GPS Location > Address Book Default > Last Session Location. If none exist, explicitly prompt the user.
+- **Dynamic Status Tiles:** Display real-time counters for "Available Schools in Area," "Admission Windows Open," and "Admission Windows Closed."
+- **Action Hub:** Provide quick access buttons for "Discover (Launch Wizard)" and "Admissions Update" (with active notification badges).
+
+### 3.3 The "Discover" Wizard & Core Filters (P0)
+- **Smart Commute Integration:** Integration with Google Maps API to calculate accurate travel times. The UI will back-calculate the "Arrive By" time based on the school's official start time (e.g., indicating an 8:15 AM departure for an 8:30 AM start).
+- **Curriculum & Age Filters:** Filter by educational boards (IGCSE, ICSE, CBSE, State) and the established age of the institution.
+- **True Total Cost of Ownership (TCO):** A strict financial filter that aggregates annual tuition, transport, cafeteria, uniform, admission, and registration fees into a single, filterable annual cost metric.
+
+### 3.4 School Detail Pages & Marketplace Actions (P1)
+- **Data Presentation:** School cards must display key statistics (enrollment size, board results, university placements) and facility icons (smart classrooms, cafeteria, transport).
+- **Direct Comparisons:** Feature allowing users to add up to 4 schools to a side-by-side comparison matrix.
+- **Application & Enquiry System:**
+  - *Partner Schools:* Parents can submit a unified "Kidscover Standard Form" containing Ward details, Parent details, Occupation, and Address. The backend will push this via API/Webhook to the partner school's CRM.
+  - *Non-Partner Schools:* The app provides a direct external link to the school's native website to maintain utility.
+
+### 3.5 B2B Communications & Ticketing System (P1)
+- **In-App Messaging:** A secure, two-way ticketing/chat interface allowing parents to communicate with partner school admission teams without exposing private contact details.
+- **Notification Engine:** Push notifications triggered by school responses or changes in admission application status.
+
+---
+
+## 4. Technical Architecture Strategy
+
+| Layer | Technology |
+|---|---|
+| Frontend (Parent) | React Native (Expo) for native iOS and Android delivery |
+| Frontend (School/Admin) | Next.js (React) for responsive desktop and lightweight mobile-web access |
+| Backend/Database | Node.js serverless functions running on Supabase (PostgreSQL) for rapid, scalable CRUD operations and authentication |
+| Integrations | Google Maps Distance Matrix API for dynamic routing/commute tracking |
+
+---
+
+## 5. Out of Scope for MVP (Phase 2 Fast-Follows)
+
+- **AI Sentiment Analysis:** Scraping Reddit and unstructured web data to calculate qualitative "Sentiment Scores" (Highly Positive vs. Negative) will be deferred until primary data pipelines are stable. Initial MVP will rely solely on aggregated Google Review scores.
+- **Payment Gateway Integration:** In-app fee payments for the admission forms.
