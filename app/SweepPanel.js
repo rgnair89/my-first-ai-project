@@ -1,8 +1,25 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/utils/supabase';
-import { buildGrid, testCells, runSweep, emptyTotals, mergeTotals, MAX_REQUESTS, BUDGET_TOP_UP } from './sweep';
+import {
+  buildGrid, testCells, runSweep, emptyTotals, mergeTotals, serializeState, restoreState,
+  makeLock, lockedByOtherTab, MAX_REQUESTS, BUDGET_TOP_UP,
+} from './sweep';
+
+const STATE_KEY = 'kidscover.sweep.v1'; // unfinished sweep, so a refresh resumes instead of starting over
+const LOCK_KEY = 'kidscover.sweep.lock'; // set by the tab that is running, so a second tab cannot start another
+
+// Browser storage can be blocked or full. The sweep still works without it; it just cannot resume after a refresh.
+function readStore(key) {
+  try { return window.localStorage.getItem(key); } catch { return null; }
+}
+function writeStore(key, value) {
+  try {
+    if (value === null) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, value);
+  } catch { /* ignore */ }
+}
 
 // supabase-js sends the signed-in admin's session; the function checks the admin role itself.
 async function invoke(body) {
@@ -15,15 +32,48 @@ async function invoke(body) {
 const toRequestCell = ({ id, low, high }) => ({ id, low, high });
 
 export default function SweepPanel() {
-  const queue = useRef([]); // cells still to search; survives a stop so the sweep can resume
-  const done = useRef(emptyTotals()); // totals from earlier runs of this sweep
+  // Read once, on the first render. This panel only appears after sign-in, so it never renders on the server.
+  const [saved] = useState(() => restoreState(readStore(STATE_KEY)));
+  const queue = useRef(saved?.queue ?? []); // cells still to search
+  const done = useRef(saved?.done ?? emptyTotals()); // totals from earlier runs of this sweep
+  const budget = useRef(saved?.budget ?? MAX_REQUESTS); // Google requests this sweep may use in total
   const stopRequested = useRef(false);
-  const budget = useRef(MAX_REQUESTS); // Google requests this sweep may use in total
-  const [limit, setLimit] = useState(MAX_REQUESTS); // the same number, kept in state so the screen can show it
+  const tabId = useRef(null);
+  const [limit, setLimit] = useState(saved?.budget ?? MAX_REQUESTS); // same number as the budget ref, for the screen
   const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState(null);
-  const [left, setLeft] = useState(0);
+  const [progress, setProgress] = useState(saved && saved.done.cells > 0 ? saved.done : null);
+  const [left, setLeft] = useState(saved?.queue.length ?? 0);
+  const [restored, setRestored] = useState(Boolean(saved && saved.queue.length > 0));
+  const [blocked, setBlocked] = useState(false);
   const [trialResult, setTrialResult] = useState('');
+
+  useEffect(() => {
+    tabId.current = globalThis.crypto?.randomUUID?.() ?? String(Math.random());
+  }, []);
+
+  // While a sweep is running: ask before the page is closed or refreshed, and give up the lock when it goes away
+  // so the refreshed page can resume straight away. (If the browser crashes instead, the lock expires by itself.)
+  useEffect(() => {
+    if (!running) return undefined;
+    const warn = (e) => { e.preventDefault(); e.returnValue = ''; };
+    const release = () => {
+      try {
+        if (JSON.parse(readStore(LOCK_KEY) ?? 'null')?.id === tabId.current) writeStore(LOCK_KEY, null);
+      } catch { /* ignore */ }
+    };
+    window.addEventListener('beforeunload', warn);
+    window.addEventListener('pagehide', release);
+    return () => {
+      window.removeEventListener('beforeunload', warn);
+      window.removeEventListener('pagehide', release);
+    };
+  }, [running]);
+
+  // Called before every batch: tells other tabs that a sweep is running here.
+  async function invokeBatch(body) {
+    writeStore(LOCK_KEY, makeLock(tabId.current));
+    return invoke(body);
+  }
 
   async function trial() {
     setRunning(true);
@@ -34,13 +84,19 @@ export default function SweepPanel() {
   }
 
   async function sweep() {
+    if (lockedByOtherTab(readStore(LOCK_KEY), tabId.current)) {
+      setBlocked(true);
+      return;
+    }
+    setBlocked(false);
+
     const fresh = queue.current.length === 0;
     if (
       fresh &&
       !window.confirm(
         `This starts the full grid sweep of Mumbai, Thane and Navi Mumbai.\n\n` +
           `Expect roughly 800-1,500 Google Places requests (about $30-55 at Google's list price, and 10-20 minutes). ` +
-          `It stops by itself at ${MAX_REQUESTS} requests (about $70). Keep this tab open. If it stops for any reason, press Resume.\n\nContinue?`,
+          `It stops by itself at ${MAX_REQUESTS} requests (about $70). If the page is refreshed it resumes where it left off.\n\nContinue?`,
       )
     ) {
       return;
@@ -57,32 +113,42 @@ export default function SweepPanel() {
       setLimit(MAX_REQUESTS);
       setProgress(null);
     }
+    setRestored(false);
     stopRequested.current = false;
     setRunning(true);
+    writeStore(STATE_KEY, serializeState({ queue: queue.current, done: done.current, budget: budget.current }));
 
     const result = await runSweep({
       queue: queue.current,
-      invoke,
+      invoke: invokeBatch,
       dryRun: false,
       maxRequests: budget.current - done.current.requests,
+      budgetLabel: budget.current,
       shouldStop: () => stopRequested.current,
       onProgress: (p) => {
-        setProgress(mergeTotals(done.current, p));
+        const merged = mergeTotals(done.current, p);
+        setProgress(merged);
         setLeft(p.queued);
+        writeStore(STATE_KEY, serializeState({ queue: queue.current, done: merged, budget: budget.current }));
       },
     });
 
     done.current = mergeTotals(done.current, result);
     setProgress(done.current);
     setLeft(result.queued);
+    writeStore(STATE_KEY, queue.current.length ? serializeState({ queue: queue.current, done: done.current, budget: budget.current }) : null);
+    writeStore(LOCK_KEY, null);
     setRunning(false);
   }
 
   function startOver() {
     queue.current = [];
     done.current = emptyTotals();
+    writeStore(STATE_KEY, null);
     setProgress(null);
     setLeft(0);
+    setRestored(false);
+    setBlocked(false);
   }
 
   const pct = progress && progress.cells + left > 0 ? Math.round((progress.cells / (progress.cells + left)) * 100) : 0;
@@ -125,6 +191,17 @@ export default function SweepPanel() {
           </button>
         )}
       </div>
+
+      {blocked && (
+        <p className="mt-3 text-sm font-bold text-amber-700">
+          A sweep is already running in another tab or window. Use that one. If you closed it, wait 3 minutes and try again.
+        </p>
+      )}
+      {restored && !running && (
+        <p className="mt-3 text-sm text-gray-700">
+          Picked up an unfinished sweep from this browser ({left} cells left). Press Resume to continue, or Start over.
+        </p>
+      )}
 
       {progress && (
         <div className="mt-5 text-sm text-gray-800 space-y-1">

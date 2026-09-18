@@ -72,6 +72,48 @@ export function testCells(grid = buildGrid(), count = BATCH_SIZE) {
   return grid.filter(inWindow).slice(0, count);
 }
 
+// ---- Remembering progress across a page refresh, and refusing to run in two tabs at once ----
+
+const STATE_VERSION = 1;
+
+export function serializeState({ queue, done, budget }) {
+  return JSON.stringify({ v: STATE_VERSION, queue, done, budget });
+}
+
+// Returns { queue, done, budget } or null if the saved text is missing, damaged or from another version.
+export function restoreState(text) {
+  if (!text) return null;
+  try {
+    const s = JSON.parse(text);
+    if (s?.v !== STATE_VERSION || !Array.isArray(s.queue)) return null;
+    const okCell = (c) =>
+      c && typeof c.id === 'string' && Number.isFinite(c.depth) &&
+      [c.low?.lat, c.low?.lng, c.high?.lat, c.high?.lng].every(Number.isFinite);
+    if (!s.queue.every(okCell)) return null;
+    return {
+      queue: s.queue,
+      done: { ...emptyTotals(), ...(s.done ?? {}) },
+      budget: Number.isFinite(s.budget) && s.budget > 0 ? s.budget : MAX_REQUESTS,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// A running tab writes a lock before every batch. Another tab treats a fresh lock as "a sweep is running".
+export const LOCK_MAX_AGE_MS = 180000;
+export const makeLock = (id, now = Date.now()) => JSON.stringify({ id, at: now });
+
+export function lockedByOtherTab(lockText, myId, now = Date.now(), maxAge = LOCK_MAX_AGE_MS) {
+  if (!lockText) return false;
+  try {
+    const l = JSON.parse(lockText);
+    return l.id !== myId && Number.isFinite(l.at) && now - l.at < maxAge;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Works through `queue` (changed in place: finished cells are removed, quarters of crowded cells are added, and a
  * batch whose call failed is put back) by calling invoke({ dryRun, cells }) BATCH_SIZE cells at a time.
@@ -84,6 +126,7 @@ export async function runSweep({
   dryRun = false,
   maxBatches = Infinity,
   maxRequests = MAX_REQUESTS,
+  budgetLabel = maxRequests, // the total limit to name in the stop message (maxRequests is only what is left of it)
   shouldStop = () => false,
   onProgress = () => {},
 }) {
@@ -92,7 +135,7 @@ export async function runSweep({
   while (queue.length) {
     if (shouldStop()) { t.stopped = 'stopped by you'; break; }
     if (t.batches >= maxBatches) { t.stopped = 'batch limit reached'; break; }
-    if (t.requests >= maxRequests) { t.stopped = `Google request budget reached (${maxRequests})`; break; }
+    if (t.requests >= maxRequests) { t.stopped = `Google request budget reached (${budgetLabel})`; break; }
 
     const batch = queue.splice(0, BATCH_SIZE);
     const { data, error } = await invoke({ dryRun, cells: batch.map(({ id, low, high }) => ({ id, low, high })) });
