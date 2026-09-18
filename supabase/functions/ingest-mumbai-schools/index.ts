@@ -283,6 +283,7 @@ function createHandler(deps: Deps) {
       for (const zone of MUMBAI_ZONES) {
         const z = { zone: zone.name, pages: 0, fetched: 0, kept: 0, skipped: 0, capped: false };
         let pageToken: string | undefined;
+        let lastPageSize = 0;
 
         for (let page = 0; page < MAX_PAGES_PER_ZONE; page++) {
           const res = await deps.fetch(PLACES_URL, {
@@ -295,6 +296,7 @@ function createHandler(deps: Deps) {
             return json({ ok: false, zone: zone.name, google_error: data.error.message, status: data.error.status }, 502);
           }
           z.pages++;
+          lastPageSize = (data.places ?? []).length;
 
           for (const place of data.places ?? []) {
             z.fetched++;
@@ -318,7 +320,9 @@ function createHandler(deps: Deps) {
           if (!pageToken) break;
         }
 
-        z.capped = Boolean(pageToken); // Google still had more results after the 3rd page: this zone is truncated
+        // Google serves at most 60 results per query and issues no token after the 3rd page, so a zone that
+        // used all 3 pages with a full last page (20) is truncated even though no token is left.
+        z.capped = Boolean(pageToken) || (z.pages === MAX_PAGES_PER_ZONE && lastPageSize >= 20);
         zones.push(z);
         await deps.sleep(300); // pacing between zones
       }
