@@ -16,6 +16,11 @@ export default function RootRouting() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
+  async function fetchProfile(userId) {
+    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    setProfile(data);
+  }
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -29,11 +34,6 @@ export default function RootRouting() {
 
     return () => subscription.unsubscribe();
   }, []);
-
-  async function fetchProfile(userId) {
-    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
-    setProfile(data);
-  }
 
   async function handleAuth(e) {
     e.preventDefault();
@@ -186,6 +186,8 @@ function AdminWebDashboard({ profile }) {
   const [applications, setApplications] = useState([]);
   const [tickets, setTickets] = useState([]);
   const [replyText, setReplyText] = useState({});
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState('');
 
   useEffect(() => {
     fetchApplications();
@@ -202,54 +204,19 @@ function AdminWebDashboard({ profile }) {
     setTickets(data || []);
   }
 
-
-function AdminWebDashboard({ profile }) {
-  const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState('');
-
   async function triggerMumbaiSync() {
     setSyncing(true);
     setSyncResult('');
-    try {
-      // Replace with your actual Supabase project reference and service role / anon key
-      const response = await fetch('https://twpcjrpknsqlycdvwtsj.supabase.co/functions/v1/ingest-mumbai-schools', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR3cGNqcnBrbnNxbHljZHZ3dHNqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTYzOTg4MiwiZXhwIjoyMTA1MjE1ODgyfQ.dRtSPgi2CrtqCCuOaHu3dVlu-QVUDO9snscXAM4Q2dg`
-        }
-      });
-      const data = await response.json();
+    // supabase-js sends the signed-in admin's session token; the function verifies the admin role.
+    const { data, error } = await supabase.functions.invoke('ingest-mumbai-schools');
+    if (error) {
+      const detail = error.context?.text ? await error.context.text().catch(() => '') : '';
+      setSyncResult(`Error: ${error.message}${detail ? ` - ${detail}` : ''}`);
+    } else {
       setSyncResult(JSON.stringify(data));
-    } catch (err) {
-      setSyncResult('Error: ' + err.message);
     }
     setSyncing(false);
   }
-
-  return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-2xl font-bold text-black">Partner Portal</h1>
-        <button onClick={() => supabase.auth.signOut()} className="text-gray-500 font-bold hover:text-black">Sign Out</button>
-      </div>
-      
-      {/* Manual Ingestion Trigger Button */}
-      <div className="bg-white border border-gray-200 p-6 rounded-xl shadow-sm mb-8">
-        <h2 className="text-lg font-bold text-gray-900 mb-2">Mumbai School Data Pipeline</h2>
-        <p className="text-sm text-gray-600 mb-4">Click below to manually invoke the public school ingestion crawler for all Mumbai zones.</p>
-        <button 
-          onClick={triggerMumbaiSync}
-          disabled={syncing}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-blue-700 disabled:opacity-50"
-        >
-          {syncing ? 'Crawling Mumbai Zones...' : 'Run Mumbai Ingestion Now'}
-        </button>
-        {syncResult && <p className="mt-4 text-xs font-mono bg-gray-50 p-3 rounded border text-black">{syncResult}</p>}
-      </div>
-    </div>
-  );
-}
 
   async function handleReply(ticketId) {
     const reply = replyText[ticketId];
@@ -278,8 +245,21 @@ function AdminWebDashboard({ profile }) {
         <button onClick={() => supabase.auth.signOut()} className="text-gray-500 font-bold hover:text-black">Sign Out</button>
       </div>
 
+      <div className="bg-white border border-gray-200 p-6 rounded-xl shadow-sm mb-8">
+        <h2 className="text-lg font-bold text-gray-900 mb-2">Mumbai School Data Pipeline</h2>
+        <p className="text-sm text-gray-600 mb-4">Click below to manually invoke the public school ingestion crawler for all Mumbai zones.</p>
+        <button
+          onClick={triggerMumbaiSync}
+          disabled={syncing}
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-blue-700 disabled:opacity-50"
+        >
+          {syncing ? 'Crawling Mumbai Zones...' : 'Run Mumbai Ingestion Now'}
+        </button>
+        {syncResult && <p className="mt-4 text-xs font-mono bg-gray-50 p-3 rounded border text-black">{syncResult}</p>}
+      </div>
+
       <div className="flex gap-4 mb-6">
-        <button 
+        <button
           onClick={() => setActiveSubTab('applications')}
           className={`px-4 py-2 rounded-lg font-bold text-sm ${activeSubTab === 'applications' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
         >
