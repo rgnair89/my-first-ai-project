@@ -5,7 +5,10 @@
 //   GOOGLE_MAPS_API_KEY  required
 //   SB_SECRET_KEY        optional - a Supabase secret key (sb_secret_...). Falls back to the built-in
 //                        SUPABASE_SERVICE_ROLE_KEY, which stops working once legacy keys are disabled.
-// Request body (optional):  { "dryRun": true }  -> reports what would change and writes nothing.
+// Request body (optional):
+//   { "dryRun": true }   -> reports what would change and writes nothing.
+//   { "cells": [ { "id": "c1", "low": {"lat": 19.05, "lng": 72.82}, "high": {"lat": 19.08, "lng": 72.85} } ] }
+//                        -> searches exactly those rectangles (max 8 per call) instead of the 8 default zones.
 //
 // What it stores: only what Google returns. Anything Google does not provide stays NULL - no guessed
 // ratings, founding years, fees or admission status.
@@ -213,16 +216,47 @@ function updatePatch(existing: SchoolRow, p: Place, nowIso: string) {
   };
 }
 
-function searchBody(zone: { name: string; latitude: number; longitude: number }, pageToken?: string) {
+// A region to search: a circle around a point (the original zones) or a rectangle "cell" sent by the admin
+// page's grid sweep. Cells use locationRestriction, so results never spill outside the rectangle.
+type Zone = { name: string; latitude: number; longitude: number };
+type Cell = { name: string; low: { latitude: number; longitude: number }; high: { latitude: number; longitude: number } };
+type Region = Zone | Cell;
+
+function searchBody(region: Region, pageToken?: string) {
+  const area = "low" in region
+    ? { locationRestriction: { rectangle: { low: region.low, high: region.high } } }
+    : { locationBias: { circle: { center: { latitude: region.latitude, longitude: region.longitude }, radius: 5000.0 } } };
   return {
-    textQuery: `schools in ${zone.name}`,
+    textQuery: "low" in region ? "schools" : `schools in ${region.name}`,
     includedType: "school",
     languageCode: "en",
     regionCode: "IN",
     pageSize: 20,
-    locationBias: { circle: { center: { latitude: zone.latitude, longitude: zone.longitude }, radius: 5000.0 } },
+    ...area,
     ...(pageToken ? { pageToken } : {}),
   };
+}
+
+// Guard rails on what an admin page may ask for, so a bug or a stray click cannot run up a Google bill:
+// a few small cells per call, inside the Mumbai region only. Returns the cells, or a message describing the problem.
+const CELL_LIMITS = { maxCells: 8, latMin: 18.5, latMax: 19.7, lngMin: 72.5, lngMax: 73.5, maxSpan: 0.06 };
+
+function parseCells(input: unknown): Cell[] | string {
+  if (!Array.isArray(input)) return "cells must be an array";
+  if (input.length < 1 || input.length > CELL_LIMITS.maxCells) return `send between 1 and ${CELL_LIMITS.maxCells} cells per call`;
+  const out: Cell[] = [];
+  for (const c of input as any[]) {
+    const low = { latitude: Number(c?.low?.lat), longitude: Number(c?.low?.lng) };
+    const high = { latitude: Number(c?.high?.lat), longitude: Number(c?.high?.lng) };
+    if (![low.latitude, low.longitude, high.latitude, high.longitude].every(Number.isFinite)) return "each cell needs numeric low and high lat/lng";
+    if (low.latitude >= high.latitude || low.longitude >= high.longitude) return "a cell's low corner must be south-west of its high corner";
+    if (low.latitude < CELL_LIMITS.latMin || high.latitude > CELL_LIMITS.latMax || low.longitude < CELL_LIMITS.lngMin || high.longitude > CELL_LIMITS.lngMax) {
+      return "cell is outside the Mumbai region";
+    }
+    if (high.latitude - low.latitude > CELL_LIMITS.maxSpan || high.longitude - low.longitude > CELL_LIMITS.maxSpan) return "cell is too large";
+    out.push({ name: String(c?.id ?? `${low.latitude},${low.longitude}`).slice(0, 60), low, high });
+  }
+  return out;
 }
 
 function chunks<T>(arr: T[], size: number): T[][] {
@@ -259,9 +293,17 @@ function createHandler(deps: Deps) {
       const denied = await requireAdmin(req, db, secretKey);
       if (denied) return denied;
 
-      let body: { dryRun?: boolean } = {};
+      let body: { dryRun?: boolean; cells?: unknown } = {};
       try { body = await req.json(); } catch { /* no body */ }
       const dryRun = body?.dryRun === true;
+
+      // No cells: search the original 8 zones. Cells: search exactly those rectangles.
+      let regions: Region[] = MUMBAI_ZONES;
+      if (body?.cells !== undefined) {
+        const parsed = parseCells(body.cells);
+        if (typeof parsed === "string") return json({ error: parsed }, 400);
+        regions = parsed;
+      }
 
       const googleKey = deps.env.get("GOOGLE_MAPS_API_KEY") ?? "";
       if (!googleKey) return json({ error: "GOOGLE_MAPS_API_KEY secret is missing in Supabase." }, 400);
@@ -280,7 +322,7 @@ function createHandler(deps: Deps) {
       let rated = 0;
       let unrated = 0;
 
-      for (const zone of MUMBAI_ZONES) {
+      for (const zone of regions) {
         const z = { zone: zone.name, pages: 0, fetched: 0, kept: 0, skipped: 0, capped: false };
         let pageToken: string | undefined;
         let lastPageSize = 0;
