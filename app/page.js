@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/utils/supabase';
 import SweepPanel from './SweepPanel';
+import ReviewsPanel from './ReviewsPanel';
+import { loadPendingCount } from './reviews-admin';
 
 export default function RootRouting() {
   const [session, setSession] = useState(null);
@@ -187,11 +189,17 @@ function AdminWebDashboard({ profile }) {
   const [applications, setApplications] = useState([]);
   const [tickets, setTickets] = useState([]);
   const [replyText, setReplyText] = useState({});
+  const [pendingReviews, setPendingReviews] = useState(0);
 
   useEffect(() => {
     fetchApplications();
     fetchTickets();
+    fetchPendingReviews();
   }, []);
+
+  async function fetchPendingReviews() {
+    setPendingReviews(await loadPendingCount(supabase));
+  }
 
   async function fetchApplications() {
     const { data } = await supabase.from('applications').select('*, schools(name)').order('created_at', { ascending: false });
@@ -245,9 +253,17 @@ function AdminWebDashboard({ profile }) {
         >
           Support Tickets ({tickets.filter(t => t.status === 'open').length} Open)
         </button>
+        <button
+          onClick={() => setActiveSubTab('reviews')}
+          className={`px-4 py-2 rounded-lg font-bold text-sm ${activeSubTab === 'reviews' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
+        >
+          Parent Reviews ({pendingReviews} waiting)
+        </button>
       </div>
 
-      {activeSubTab === 'applications' ? (
+      {activeSubTab === 'reviews' ? (
+        <ReviewsPanel onChanged={fetchPendingReviews} />
+      ) : activeSubTab === 'applications' ? (
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden p-6">
           <h2 className="text-lg font-bold text-gray-900 mb-4">Submitted Applications</h2>
           {applications.length === 0 ? (
