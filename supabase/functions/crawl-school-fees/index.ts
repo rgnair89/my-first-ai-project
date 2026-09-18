@@ -1,8 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as cheerio from "https://esm.sh/cheerio@1.0.0-rc.12";
+import { withAdminAuth } from "../_shared/auth.ts";
 
-serve(async (_req) => {
+serve(withAdminAuth(async (_req) => {
   try {
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
@@ -183,4 +184,4 @@ const { error: upsertErr } = await supabase.from("school_fees").upsert({
       headers: { "Content-Type": "application/json" } 
     });
   }
-});
+}));

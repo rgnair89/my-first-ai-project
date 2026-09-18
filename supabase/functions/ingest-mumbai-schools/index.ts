@@ -1,6 +1,7 @@
 // supabase/functions/ingest-mumbai-schools/index.ts
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { withAdminAuth } from "../_shared/auth.ts";
 
 const MUMBAI_ZONES = [
   { name: 'Bandra West Mumbai', latitude: 19.0657, longitude: 72.8383 },
@@ -82,7 +83,7 @@ function getEstimatedFeesByBoard(board: string) {
   };
 }
 
-serve(async (_req) => {
+serve(withAdminAuth(async (_req) => {
   try {
     const googleApiKey = Deno.env.get('GOOGLE_MAPS_API_KEY') || '';
     if (!googleApiKey) {
@@ -217,4 +218,4 @@ serve(async (_req) => {
   } catch (err) {
     return new Response(JSON.stringify({ success: false, error: err.message }), { status: 500 });
   }
-});
+}));
