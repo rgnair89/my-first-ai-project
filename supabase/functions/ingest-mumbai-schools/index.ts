@@ -1,221 +1,389 @@
 // supabase/functions/ingest-mumbai-schools/index.ts
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { withAdminAuth } from "../_shared/auth.ts";
+//
+// Self-contained: paste this whole file into the dashboard editor. No other files are needed.
+// Secrets it reads:
+//   GOOGLE_MAPS_API_KEY  required
+//   SB_SECRET_KEY        optional - a Supabase secret key (sb_secret_...). Falls back to the built-in
+//                        SUPABASE_SERVICE_ROLE_KEY, which stops working once legacy keys are disabled.
+// Request body (optional):  { "dryRun": true }  -> reports what would change and writes nothing.
+//
+// What it stores: only what Google returns. Anything Google does not provide stays NULL - no guessed
+// ratings, founding years, fees or admission status.
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+// ==== BEGIN testable logic (must not use imports or Deno globals) ====
 
 const MUMBAI_ZONES = [
-  { name: 'Bandra West Mumbai', latitude: 19.0657, longitude: 72.8383 },
-  { name: 'Andheri West Mumbai', latitude: 19.1136, longitude: 72.8335 },
-  { name: 'Parel Sewri Mumbai', latitude: 19.0033, longitude: 72.8424 },       // Covers JBCN Parel area
-  { name: 'Mulund West Mumbai', latitude: 19.1726, longitude: 72.9562 },      // Covers JBCN Mulund area
-  { name: 'Chembur Mumbai', latitude: 19.0625, longitude: 72.9023 },           // Covers JBCN Chembur
-  { name: 'Oshiwara Andheri Mumbai', latitude: 19.1450, longitude: 72.8340 },  // Covers JBCN Oshiwara
-  { name: 'Borivali West Mumbai', latitude: 19.2307, longitude: 72.8567 },     // Covers JBCN Borivali
-  { name: 'Thane West', latitude: 19.2183, longitude: 72.9781 }
+  { name: "Bandra West Mumbai", latitude: 19.0657, longitude: 72.8383 },
+  { name: "Andheri West Mumbai", latitude: 19.1136, longitude: 72.8335 },
+  { name: "Parel Sewri Mumbai", latitude: 19.0033, longitude: 72.8424 },
+  { name: "Mulund West Mumbai", latitude: 19.1726, longitude: 72.9562 },
+  { name: "Chembur Mumbai", latitude: 19.0625, longitude: 72.9023 },
+  { name: "Oshiwara Andheri Mumbai", latitude: 19.1450, longitude: 72.8340 },
+  { name: "Borivali West Mumbai", latitude: 19.2307, longitude: 72.8567 },
+  { name: "Thane West", latitude: 19.2183, longitude: 72.9781 },
 ];
 
-// Helper to determine board affiliation from school name and address
-function detectBoard(name: string, address: string): string {
-  const text = `${name} ${address}`.toLowerCase();
-  const boards: string[] = [];
+const PLACES_URL = "https://places.googleapis.com/v1/places:searchText";
+const FIELD_MASK =
+  "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.websiteUri,places.types,nextPageToken";
+const MAX_PAGES_PER_ZONE = 3; // Google returns at most 20 places per page and 60 per query
 
-  if (text.includes('ib') || text.includes('international baccalaureate') || text.includes('world school')) {
-    boards.push('IB');
-  }
-  if (text.includes('igcse') || text.includes('cambridge')) {
-    boards.push('IGCSE');
-  }
-  if (text.includes('icse') || text.includes('convent') || text.includes('scottish') || text.includes('cathedral')) {
-    boards.push('ICSE');
-  }
-  if (text.includes('cbse') || text.includes('public school') || text.includes('bhavan') || text.includes('d.a.v.') || text.includes('dav')) {
-    boards.push('CBSE');
-  }
+// ---- BEGIN admin-auth (identical in every function) ----
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
 
-  if (boards.length > 0) {
-    return boards.join(' / ');
-  }
-  if (text.includes('high school') || text.includes('vidyalaya') || text.includes('vidyamandir')) {
-    return 'State Board';
-  }
-  return 'CBSE / ICSE';
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 }
 
-// Helper to generate a realistic initial fee structure based on the board
-function getEstimatedFeesByBoard(board: string) {
-  if (board.includes('IB') || board.includes('IGCSE')) {
-    return {
-      base_tuition_annual: 420000,
-      transport_annual: 55000,
-      admission_one_time: 75000,
-      tech_activity_annual: 30000,
-      cafeteria_annual: 25000,
-      total_tco: 605000
-    };
-  }
-  if (board.includes('ICSE')) {
-    return {
-      base_tuition_annual: 165000,
-      transport_annual: 32000,
-      admission_one_time: 25000,
-      tech_activity_annual: 15000,
-      cafeteria_annual: 0,
-      total_tco: 237000
-    };
-  }
-  if (board.includes('CBSE')) {
-    return {
-      base_tuition_annual: 125000,
-      transport_annual: 28000,
-      admission_one_time: 25000,
-      tech_activity_annual: 12000,
-      cafeteria_annual: 0,
-      total_tco: 190000
-    };
-  }
+// Returns a Response to send back when the caller is not allowed, or null when they are.
+async function requireAdmin(req: Request, admin: any, secretKey: string): Promise<Response | null> {
+  const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
+  if (!token) return json({ error: "Missing bearer token" }, 401);
+
+  // Server-to-server callers (e.g. a pg_cron job) present the secret key itself.
+  if (secretKey && token === secretKey) return null;
+
+  const { data, error } = await admin.auth.getUser(token);
+  const user = data?.user;
+  if (error || !user) return json({ error: "Invalid session" }, 401);
+
+  const { data: profile } = await admin.from("profiles").select("role").eq("id", user.id).single();
+  if (profile?.role !== "admin") return json({ error: "Admin role required" }, 403);
+  return null;
+}
+// ---- END admin-auth ----
+
+type Place = {
+  placeId: string;
+  name: string;
+  address: string | null;
+  lat: number;
+  lng: number;
+  rating: number | null;
+  reviewCount: number | null;
+  website: string | null;
+  types: string[];
+};
+
+type SchoolRow = {
+  id: string;
+  name: string;
+  latitude: number | string | null;
+  longitude: number | string | null;
+  website: string | null;
+  google_place_id: string | null;
+  _n?: string;
+};
+
+type Deps = {
+  env: { get(name: string): string | undefined };
+  fetch: typeof fetch;
+  createClient: (url: string, key: string) => any;
+  now: () => Date;
+  sleep: (ms: number) => Promise<void>;
+};
+
+// Only accept places Google types as a school, and drop coaching / tuition centres that carry that type.
+const SCHOOL_TYPES = ["school", "primary_school", "secondary_school"];
+const NOT_A_SCHOOL = /\b(coaching|tuitions?|tutorials?|classes)\b/i;
+
+function isSchoolPlace(p: Place): boolean {
+  return p.types.some((t) => SCHOOL_TYPES.includes(t)) && !NOT_A_SCHOOL.test(p.name);
+}
+
+// Board is only set when the school's own name says so, as a whole word. Otherwise it stays NULL (unknown)
+// until it is read from an authoritative source. (The old substring matching tagged "Vibgyor" as IB.)
+const BOARD_PATTERNS: [string, RegExp][] = [
+  ["IB", /\bIB\b|international baccalaureate/i],
+  ["IGCSE", /\bIGCSE\b/],
+  ["ICSE", /\bICSE\b/],
+  ["CBSE", /\bCBSE\b/],
+  ["State Board", /\bSSC\b|state board/i],
+];
+
+function detectBoard(name: string): string | null {
+  const found = BOARD_PATTERNS.filter(([, re]) => re.test(name)).map(([label]) => label);
+  return found.length ? found.join(" / ") : null;
+}
+
+function normName(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function normalizePlace(place: any): Place | null {
+  const name = place?.displayName?.text;
+  const lat = place?.location?.latitude;
+  const lng = place?.location?.longitude;
+  if (!place?.id || !name || typeof lat !== "number" || typeof lng !== "number") return null;
   return {
-    base_tuition_annual: 65000,
-    transport_annual: 22000,
-    admission_one_time: 15000,
-    tech_activity_annual: 8000,
-    cafeteria_annual: 0,
-    total_tco: 110000
+    placeId: place.id,
+    name,
+    address: place.formattedAddress ?? null,
+    lat,
+    lng,
+    rating: typeof place.rating === "number" ? place.rating : null,
+    reviewCount: typeof place.userRatingCount === "number" ? place.userRatingCount : null,
+    website: place.websiteUri ?? null,
+    types: Array.isArray(place.types) ? place.types : [],
   };
 }
 
-serve(withAdminAuth(async (_req) => {
-  try {
-    const googleApiKey = Deno.env.get('GOOGLE_MAPS_API_KEY') || '';
-    if (!googleApiKey) {
-      return new Response(JSON.stringify({ error: "GOOGLE_MAPS_API_KEY secret is missing in Supabase." }), { status: 400 });
-    }
+// Rows stored before place IDs existed: same name and (within ~50 m) the same coordinates Google gave us.
+// The matched row is removed from the pool so two places can never claim one row.
+function takeLegacyMatch(pool: SchoolRow[], p: Place): SchoolRow | null {
+  const n = normName(p.name);
+  const i = pool.findIndex(
+    (r) =>
+      r._n === n &&
+      Math.abs(Number(r.latitude) - p.lat) < 0.0005 &&
+      Math.abs(Number(r.longitude) - p.lng) < 0.0005,
+  );
+  return i === -1 ? null : pool.splice(i, 1)[0];
+}
 
-    const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+// Words too common to prove two records are the same school (generic terms and neighbourhood names).
+const GENERIC_WORDS = new Set([
+  "school", "schools", "high", "junior", "senior", "primary", "secondary", "the", "of", "and", "mumbai",
+  "public", "english", "international", "academy", "college", "vidyalaya", "convent", "municipal", "bmc",
+  "pre", "nursery", "montessori", "foundation", "trust", "education", "educational", "institute", "west",
+  "east", "north", "south", "andheri", "bandra", "borivali", "chembur", "mulund", "thane", "parel",
+  "oshiwara", "malad", "goregaon", "kandivali", "dahisar", "powai", "sewri",
+]);
+
+function significantWords(name: string): string[] {
+  return normName(name).split(" ").filter((w) => w.length >= 3 && !GENERIC_WORDS.has(w));
+}
+
+function metersBetween(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const dLat = (lat1 - lat2) * 111320;
+  const dLng = (lng1 - lng2) * 111320 * Math.cos((lat1 * Math.PI) / 180);
+  return Math.hypot(dLat, dLng);
+}
+
+// Report only, never acts on it: would-be new schools that sit within 300 m of a stored school that this run
+// could not match, and share a distinctive word in the name. Catches renamed or moved listings.
+function findPossibleDuplicates(
+  inserts: { name: string; latitude: number; longitude: number }[],
+  unmatched: SchoolRow[],
+): { new: string; existing: string; existing_id: string }[] {
+  const out: { new: string; existing: string; existing_id: string }[] = [];
+  for (const ins of inserts) {
+    const words = significantWords(ins.name);
+    if (!words.length) continue;
+    const hit = unmatched.find(
+      (r) =>
+        metersBetween(ins.latitude, ins.longitude, Number(r.latitude), Number(r.longitude)) <= 300 &&
+        significantWords(r.name).some((w) => words.includes(w)),
     );
-
-    let totalAdded = 0;
-    const debugLogs: string[] = [];
-
-    for (const zone of MUMBAI_ZONES) {
-      // Fetch places with websiteUri included in the field mask
-      const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': googleApiKey,
-          'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.websiteUri'
-        },
-        body: JSON.stringify({
-          textQuery: `schools in ${zone.name}`,
-          locationBias: {
-            circle: {
-              center: { latitude: zone.latitude, longitude: zone.longitude },
-              radius: 5000.0
-            }
-          }
-        })
-      });
-
-      const data = await response.json();
-
-      if (data.error) {
-        return new Response(JSON.stringify({ 
-          success: false, 
-          google_error: data.error.message, 
-          status: data.error.status 
-        }), { status: 400 });
-      }
-
-      if (data.places && data.places.length > 0) {
-        for (const place of data.places) {
-          const name = place.displayName?.text;
-          const address = place.formattedAddress || zone.name;
-          const lat = place.location?.latitude;
-          const lon = place.location?.longitude;
-          const rating = place.rating || 4.2;
-          const reviewCount = place.userRatingCount || 45;
-          const website = place.websiteUri || null;
-
-          if (!name || !lat || !lon) continue;
-
-          // Check if school already exists by name AND proximity (handles multiple franchise campuses)
-          const { data: existing } = await supabaseAdmin
-            .from('schools')
-            .select('id, latitude, longitude, website')
-            .eq('name', name);
-
-          let isDuplicate = false;
-          let existingCampusId: string | null = null;
-
-          if (existing && existing.length > 0) {
-            for (const s of existing) {
-              const latDiff = Math.abs(s.latitude - lat);
-              const lonDiff = Math.abs(s.longitude - lon);
-              
-              // True duplicate if within ~2km
-              if (latDiff < 0.02 && lonDiff < 0.02) {
-                isDuplicate = true;
-                existingCampusId = s.id;
-                // Backfill website if the record was previously missing it
-                if (!s.website && website) {
-                  await supabaseAdmin.from('schools').update({ website }).eq('id', s.id);
-                }
-                break;
-              }
-            }
-          }
-
-          if (!isDuplicate) {
-            const detectedBoard = detectBoard(name, address);
-            const feeTier = getEstimatedFeesByBoard(detectedBoard);
-
-            const { data: newSchool, error: insertError } = await supabaseAdmin
-              .from('schools')
-              .insert([{
-                name,
-                address,
-                website,
-                board: detectedBoard,
-                established_year: 1998,
-                latitude: lat,
-                longitude: lon,
-                google_rating: rating,
-                google_review_count: reviewCount,
-                admissions_open: true,
-                student_teacher_ratio: detectedBoard.includes('IB') ? '10:1' : '15:1'
-              }])
-              .select()
-              .single();
-
-            if (newSchool) {
-              await supabaseAdmin.from('school_fees').insert([{
-                school_id: newSchool.id,
-                ...feeTier
-              }]);
-              totalAdded++;
-            } else if (insertError) {
-              debugLogs.push(`Insert failed for ${name}: ${insertError.message}`);
-            }
-          }
-        }
-      } else {
-        debugLogs.push(`No places returned by Google for zone: ${zone.name}`);
-      }
-
-      // Small pacing pause between zone requests
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-
-    return new Response(JSON.stringify({ 
-      success: true, 
-      total_new_schools_added: totalAdded, 
-      logs: debugLogs 
-    }), {
-      headers: { "Content-Type": "application/json" },
-    });
-  } catch (err) {
-    return new Response(JSON.stringify({ success: false, error: err.message }), { status: 500 });
+    if (hit) out.push({ new: ins.name, existing: hit.name, existing_id: hit.id });
   }
-}));
+  return out;
+}
+
+function insertRow(p: Place, nowIso: string) {
+  return {
+    name: p.name,
+    address: p.address,
+    latitude: p.lat,
+    longitude: p.lng,
+    website: p.website,
+    google_place_id: p.placeId,
+    google_rating: p.rating,
+    google_review_count: p.reviewCount,
+    board: detectBoard(p.name),
+    admissions_open: null, // unknown until read from the school's own site
+    last_synced_at: nowIso,
+  };
+}
+
+// Existing rows only get Google-sourced fields refreshed; a website we already have is kept.
+// A rating is only written when Google actually returned one: "no rating in this response" must never
+// overwrite a rating we already hold.
+function updatePatch(existing: SchoolRow, p: Place, nowIso: string) {
+  return {
+    google_place_id: p.placeId,
+    ...(p.rating !== null ? { google_rating: p.rating } : {}),
+    ...(p.reviewCount !== null ? { google_review_count: p.reviewCount } : {}),
+    website: existing.website ?? p.website,
+    last_synced_at: nowIso,
+  };
+}
+
+function searchBody(zone: { name: string; latitude: number; longitude: number }, pageToken?: string) {
+  return {
+    textQuery: `schools in ${zone.name}`,
+    includedType: "school",
+    languageCode: "en",
+    regionCode: "IN",
+    pageSize: 20,
+    locationBias: { circle: { center: { latitude: zone.latitude, longitude: zone.longitude }, radius: 5000.0 } },
+    ...(pageToken ? { pageToken } : {}),
+  };
+}
+
+function chunks<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+async function loadSchools(db: any): Promise<SchoolRow[]> {
+  const rows: SchoolRow[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await db
+      .from("schools")
+      .select("id, name, latitude, longitude, website, google_place_id")
+      .order("id")
+      .range(from, from + 999);
+    if (error) throw new Error(`could not read schools: ${error.message}`);
+    rows.push(...data);
+    if (data.length < 1000) break;
+  }
+  for (const r of rows) r._n = normName(r.name);
+  return rows;
+}
+
+function createHandler(deps: Deps) {
+  return async (req: Request): Promise<Response> => {
+    if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+
+    try {
+      const url = deps.env.get("SUPABASE_URL") ?? "";
+      const secretKey = deps.env.get("SB_SECRET_KEY") ?? deps.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+      const db = deps.createClient(url, secretKey);
+
+      const denied = await requireAdmin(req, db, secretKey);
+      if (denied) return denied;
+
+      let body: { dryRun?: boolean } = {};
+      try { body = await req.json(); } catch { /* no body */ }
+      const dryRun = body?.dryRun === true;
+
+      const googleKey = deps.env.get("GOOGLE_MAPS_API_KEY") ?? "";
+      if (!googleKey) return json({ error: "GOOGLE_MAPS_API_KEY secret is missing in Supabase." }, 400);
+
+      const known = await loadSchools(db);
+      const byPlaceId = new Map<string, SchoolRow>();
+      const legacy: SchoolRow[] = [];
+      for (const r of known) (r.google_place_id ? byPlaceId.set(r.google_place_id, r) : legacy.push(r));
+
+      const nowIso = deps.now().toISOString();
+      const seen = new Set<string>();
+      const toInsert: ReturnType<typeof insertRow>[] = [];
+      const toUpdate: { id: string; patch: ReturnType<typeof updatePatch> }[] = [];
+      const skippedExamples: string[] = [];
+      const zones: { zone: string; pages: number; fetched: number; kept: number; skipped: number; capped: boolean }[] = [];
+      let rated = 0;
+      let unrated = 0;
+
+      for (const zone of MUMBAI_ZONES) {
+        const z = { zone: zone.name, pages: 0, fetched: 0, kept: 0, skipped: 0, capped: false };
+        let pageToken: string | undefined;
+        let lastPageSize = 0;
+
+        for (let page = 0; page < MAX_PAGES_PER_ZONE; page++) {
+          const res = await deps.fetch(PLACES_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Goog-Api-Key": googleKey, "X-Goog-FieldMask": FIELD_MASK },
+            body: JSON.stringify(searchBody(zone, pageToken)),
+          });
+          const data = await res.json();
+          if (data.error) {
+            return json({ ok: false, zone: zone.name, google_error: data.error.message, status: data.error.status }, 502);
+          }
+          z.pages++;
+          lastPageSize = (data.places ?? []).length;
+
+          for (const place of data.places ?? []) {
+            z.fetched++;
+            const p = normalizePlace(place);
+            if (!p || !isSchoolPlace(p)) {
+              z.skipped++;
+              if (skippedExamples.length < 10) skippedExamples.push(p?.name ?? "(incomplete record)");
+              continue;
+            }
+            if (seen.has(p.placeId)) continue;
+            seen.add(p.placeId);
+            z.kept++;
+            if (p.rating !== null) rated++; else unrated++;
+
+            const existing = byPlaceId.get(p.placeId) ?? takeLegacyMatch(legacy, p);
+            if (existing) toUpdate.push({ id: existing.id, patch: updatePatch(existing, p, nowIso) });
+            else toInsert.push(insertRow(p, nowIso));
+          }
+
+          pageToken = data.nextPageToken;
+          if (!pageToken) break;
+        }
+
+        // Google serves at most 60 results per query and issues no token after the 3rd page, so a zone that
+        // used all 3 pages with a full last page (20) is truncated even though no token is left.
+        z.capped = Boolean(pageToken) || (z.pages === MAX_PAGES_PER_ZONE && lastPageSize >= 20);
+        zones.push(z);
+        await deps.sleep(300); // pacing between zones
+      }
+
+      // `legacy` now holds only stored schools this run could not match to a Google result
+      const possibleDuplicates = findPossibleDuplicates(toInsert, legacy);
+
+      const errors: string[] = [];
+      let inserted = 0;
+      let updated = 0;
+
+      if (!dryRun) {
+        for (const chunk of chunks(toInsert, 100)) {
+          const { data, error } = await db
+            .from("schools")
+            .upsert(chunk, { onConflict: "google_place_id", ignoreDuplicates: true })
+            .select("id");
+          if (error) errors.push(`insert failed: ${error.message}`);
+          else inserted += data?.length ?? 0;
+        }
+        for (const chunk of chunks(toUpdate, 20)) {
+          await Promise.all(
+            chunk.map(async (u) => {
+              const { error } = await db.from("schools").update(u.patch).eq("id", u.id);
+              if (error) errors.push(`update ${u.id}: ${error.message}`);
+              else updated++;
+            }),
+          );
+        }
+      }
+
+      return json({
+        ok: errors.length === 0,
+        dryRun,
+        would_insert: toInsert.length,
+        would_update: toUpdate.length,
+        inserted,
+        updated,
+        skipped_not_school: zones.reduce((n, z) => n + z.skipped, 0),
+        skipped_examples: skippedExamples,
+        ratings: { with_rating: rated, without_rating: unrated },
+        stored_but_unmatched: { count: legacy.length, examples: legacy.slice(0, 10).map((r) => r.name) },
+        possible_duplicates: { count: possibleDuplicates.length, examples: possibleDuplicates.slice(0, 10) },
+        zones,
+        errors: errors.slice(0, 20),
+        ...(dryRun ? { sample: { insert: toInsert.slice(0, 3), update: toUpdate.slice(0, 3) } } : {}),
+      });
+    } catch (err) {
+      return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  };
+}
+
+// ==== END testable logic ====
+
+Deno.serve(
+  createHandler({
+    env: Deno.env,
+    fetch,
+    createClient,
+    now: () => new Date(),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  }),
+);
