@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/utils/supabase';
+import SweepPanel from './SweepPanel';
 
 export default function RootRouting() {
   const [session, setSession] = useState(null);
@@ -186,8 +187,6 @@ function AdminWebDashboard({ profile }) {
   const [applications, setApplications] = useState([]);
   const [tickets, setTickets] = useState([]);
   const [replyText, setReplyText] = useState({});
-  const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState('');
 
   useEffect(() => {
     fetchApplications();
@@ -202,20 +201,6 @@ function AdminWebDashboard({ profile }) {
   async function fetchTickets() {
     const { data } = await supabase.from('tickets').select('*, schools(name), profiles(first_name, last_name, email)').order('created_at', { ascending: false });
     setTickets(data || []);
-  }
-
-  async function triggerMumbaiSync(dryRun) {
-    setSyncing(true);
-    setSyncResult('');
-    // supabase-js sends the signed-in admin's session token; the function verifies the admin role.
-    const { data, error } = await supabase.functions.invoke('ingest-mumbai-schools', { body: { dryRun } });
-    if (error) {
-      const detail = error.context?.text ? await error.context.text().catch(() => '') : '';
-      setSyncResult(`Error: ${error.message}${detail ? ` - ${detail}` : ''}`);
-    } else {
-      setSyncResult(JSON.stringify(data, null, 2));
-    }
-    setSyncing(false);
   }
 
   async function handleReply(ticketId) {
@@ -245,27 +230,7 @@ function AdminWebDashboard({ profile }) {
         <button onClick={() => supabase.auth.signOut()} className="text-gray-500 font-bold hover:text-black">Sign Out</button>
       </div>
 
-      <div className="bg-white border border-gray-200 p-6 rounded-xl shadow-sm mb-8">
-        <h2 className="text-lg font-bold text-gray-900 mb-2">Mumbai School Data Pipeline</h2>
-        <p className="text-sm text-gray-600 mb-4">Pulls Mumbai schools from Google Places. Run the preview first: it shows what would change and writes nothing.</p>
-        <div className="flex gap-3">
-          <button
-            onClick={() => triggerMumbaiSync(true)}
-            disabled={syncing}
-            className="bg-white border border-blue-600 text-blue-600 px-4 py-2 rounded-lg font-bold text-sm hover:bg-blue-50 disabled:opacity-50"
-          >
-            {syncing ? 'Working...' : 'Preview (no changes)'}
-          </button>
-          <button
-            onClick={() => triggerMumbaiSync(false)}
-            disabled={syncing}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-blue-700 disabled:opacity-50"
-          >
-            {syncing ? 'Working...' : 'Run Mumbai Ingestion Now'}
-          </button>
-        </div>
-        {syncResult && <pre className="mt-4 text-xs font-mono bg-gray-50 p-3 rounded border text-black whitespace-pre-wrap max-h-96 overflow-auto">{syncResult}</pre>}
-      </div>
+      <SweepPanel />
 
       <div className="flex gap-4 mb-6">
         <button
