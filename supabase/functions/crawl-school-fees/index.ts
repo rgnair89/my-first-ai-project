@@ -1,70 +1,101 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+// supabase/functions/crawl-school-fees/index.ts
+//
+// Self-contained: paste this whole file into the dashboard editor. No other files are needed.
+// Secrets it reads:
+//   SB_SECRET_KEY  optional - a Supabase secret key (sb_secret_...). Falls back to the built-in
+//                  SUPABASE_SERVICE_ROLE_KEY, which stops working once legacy keys are disabled.
+//
+// REPORT-ONLY. It visits up to 5 schools' websites per call and reports which fee figures it can see,
+// but it does NOT write to school_fees: that table requires academic_year and grade_level, and the old
+// guessed numbers (admission 25,000 / transport 30,000 / activity 15,000, and 1,00,000 for PDF-only
+// sites) were invented. It still stamps schools.last_crawled_at so repeated calls move on to the next
+// schools. Fee storage comes back once the fee model (per year and grade, with sources) is designed.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as cheerio from "https://esm.sh/cheerio@1.0.0-rc.12";
-import { withAdminAuth } from "../_shared/auth.ts";
 
-serve(withAdminAuth(async (_req) => {
+// ---- BEGIN admin-auth (identical in every function) ----
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
+}
+
+// Returns a Response to send back when the caller is not allowed, or null when they are.
+async function requireAdmin(req: Request, admin: any, secretKey: string): Promise<Response | null> {
+  const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
+  if (!token) return json({ error: "Missing bearer token" }, 401);
+
+  // Server-to-server callers (e.g. a pg_cron job) present the secret key itself.
+  if (secretKey && token === secretKey) return null;
+
+  const { data, error } = await admin.auth.getUser(token);
+  const user = data?.user;
+  if (error || !user) return json({ error: "Invalid session" }, 401);
+
+  const { data: profile } = await admin.from("profiles").select("role").eq("id", user.id).single();
+  if (profile?.role !== "admin") return json({ error: "Admin role required" }, 403);
+  return null;
+}
+// ---- END admin-auth ----
+
+const UA = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" };
+const rupeeChar = String.fromCharCode(0x20B9);
+
+Deno.serve(async (req: Request): Promise<Response> => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+
   try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
-    );
+    const secretKey = Deno.env.get("SB_SECRET_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const supabase = createClient(Deno.env.get("SUPABASE_URL") ?? "", secretKey);
 
-    // Fetch 5 schools that haven't been crawled yet (or crawled longest ago)
+    const denied = await requireAdmin(req, supabase, secretKey);
+    if (denied) return denied;
+
+    // The 5 schools crawled longest ago (or never)
     const { data: schools, error: fetchErr } = await supabase
       .from("schools")
-      .select("id, name, website, board")
+      .select("id, name, website")
       .not("website", "is", null)
       .order("last_crawled_at", { ascending: true, nullsFirst: true })
       .limit(5);
 
-    if (fetchErr) {
-      return new Response(JSON.stringify({ error: fetchErr.message }), { status: 500 });
-    }
-
+    if (fetchErr) return json({ error: fetchErr.message }, 500);
     if (!schools || schools.length === 0) {
-      return new Response(JSON.stringify({ 
-        success: true, 
-        message: "No schools found with websites to process." 
-      }), { headers: { "Content-Type": "application/json" } });
+      return json({ success: true, message: "No schools found with websites to process." });
     }
 
     const logs: any[] = [];
-    const rupeeChar = String.fromCharCode(0x20B9);
 
     for (const school of schools) {
-      const schoolLog: any = { 
-        name: school.name, 
-        website: school.website, 
+      const schoolLog: any = {
+        name: school.name,
+        website: school.website,
         targetUrl: school.website,
         pdfUrl: null,
-        extracted: null, 
-        status: "pending" 
+        figures_found: [],
+        median_guess: null,
+        status: "pending",
       };
 
       try {
-        // Mark school as crawled immediately to guarantee batch rotation
-        await supabase
-          .from("schools")
-          .update({ last_crawled_at: new Date().toISOString() })
-          .eq("id", school.id);
+        // Mark as crawled first so the batch rotates even if this school's site fails
+        await supabase.from("schools").update({ last_crawled_at: new Date().toISOString() }).eq("id", school.id);
 
-        const homeRes = await fetch(school.website, {
-          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
-        });
+        const homeRes = await fetch(school.website, { headers: UA, signal: AbortSignal.timeout(10000) });
         const homeHtml = await homeRes.text();
         const $ = cheerio.load(homeHtml);
 
-        let targetUrl = school.website;
+        let targetUrl: string = school.website;
         let detectedPdfUrl: string | null = null;
 
-        const anchorElements = $("a").toArray();
-        for (const el of anchorElements) {
+        for (const el of $("a").toArray()) {
           const href = $(el).attr("href");
           if (!href) continue;
 
-          const textVal = $(el).text() || "";
-          const linkText = textVal.toLowerCase();
+          const linkText = ($(el).text() || "").toLowerCase();
           const lowerHref = href.toLowerCase();
 
           const isPdf = lowerHref.endsWith(".pdf");
@@ -81,107 +112,49 @@ serve(withAdminAuth(async (_req) => {
         schoolLog.targetUrl = targetUrl;
         schoolLog.pdfUrl = detectedPdfUrl;
 
-        const targetRes = await fetch(targetUrl, {
-          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
-        });
+        const targetRes = await fetch(targetUrl, { headers: UA, signal: AbortSignal.timeout(10000) });
         const targetHtml = await targetRes.text();
         const $$ = cheerio.load(targetHtml);
 
         const detectedFigures: number[] = [];
 
-        // Strategy 1: Currency tokens (₹, Rs., INR) — lowered floor to 5,000 for term installments
+        // Strategy 1: currency tokens (Rs., INR, rupee sign), floor of 5,000 to allow term instalments
         const currencyPattern = new RegExp("(?:Rs\\.?|INR|" + rupeeChar + ")\\s*([0-9,]{4,8})", "gi");
         let match: RegExpExecArray | null = currencyPattern.exec(targetHtml);
         while (match !== null) {
-          const cleanNum = parseInt(match[1].replace(/,/g, ""), 10);
-          if (!isNaN(cleanNum) && cleanNum >= 5000 && cleanNum <= 1500000) {
-            detectedFigures.push(cleanNum);
-          }
+          const num = parseInt(match[1].replace(/,/g, ""), 10);
+          if (!isNaN(num) && num >= 5000 && num <= 1500000) detectedFigures.push(num);
           match = currencyPattern.exec(targetHtml);
         }
 
-        // Strategy 2: HTML tables with fee headers
-        const tableRows = $$("tr").toArray();
-        for (const row of tableRows) {
+        // Strategy 2: table rows that look like fee rows
+        for (const row of $$("tr").toArray()) {
           const rowText = ($$(row).text() || "").toLowerCase();
-          const isFeeRow = ["tuition", "annual", "term", "quarter", "total", "admission", "composite"].some(function(k) {
-            return rowText.indexOf(k) !== -1;
-          });
-
-          if (isFeeRow) {
-            const cells = $$(row).find("td, th").toArray();
-            for (const cell of cells) {
-              const cellText = ($$(cell).text() || "").trim().replace(/,/g, "");
-              const num = parseInt(cellText, 10);
-              if (!isNaN(num) && num >= 5000 && num <= 1500000) {
-                detectedFigures.push(num);
-              }
-            }
+          const isFeeRow = ["tuition", "annual", "term", "quarter", "total", "admission", "composite"].some((k) => rowText.indexOf(k) !== -1);
+          if (!isFeeRow) continue;
+          for (const cell of $$(row).find("td, th").toArray()) {
+            const num = parseInt(($$(cell).text() || "").trim().replace(/,/g, ""), 10);
+            if (!isNaN(num) && num >= 5000 && num <= 1500000) detectedFigures.push(num);
           }
         }
 
-        // Strategy 3: Calculate Annual TCO
-        if (detectedFigures.length > 0) {
-          detectedFigures.sort((a, b) => a - b);
-          const medianVal = detectedFigures[Math.floor(detectedFigures.length / 2)];
-          
-          // If median is a term/quarter installment (< ₹40,000), extrapolate to 4 quarters
-          const baseTuition = medianVal < 40000 ? medianVal * 4 : medianVal;
-          const totalTco = Math.round(baseTuition * 1.25);
+        detectedFigures.sort((a, b) => a - b);
+        schoolLog.figures_found = detectedFigures.slice(0, 15);
+        // A guess, not a fee: the median of every rupee figure on the page. Reported only, never saved.
+        schoolLog.median_guess = detectedFigures.length ? detectedFigures[Math.floor(detectedFigures.length / 2)] : null;
 
-// With total_tco excluded:
-const { error: upsertErr } = await supabase.from("school_fees").upsert({
-  school_id: school.id,
-  base_tuition_annual: baseTuition,
-  admission_one_time: 25000,
-  transport_annual: 30000,
-  tech_activity_annual: 15000,
-  source_url: targetUrl,
-  fee_pdf_url: detectedPdfUrl
-}, { onConflict: "school_id" });
-
-          if (upsertErr) {
-            schoolLog.status = "Database error: " + upsertErr.message;
-          } else {
-            schoolLog.extracted = { baseTuition, totalTco };
-            schoolLog.status = "Successfully parsed and saved fee values";
-          }
-        } else if (detectedPdfUrl) {
-  await supabase.from("school_fees").upsert({
-    school_id: school.id,
-    base_tuition_annual: 100000,
-    admission_one_time: 25000,
-    transport_annual: 30000,
-    tech_activity_annual: 15000,
-    source_url: targetUrl,
-    fee_pdf_url: detectedPdfUrl
-  }, { onConflict: "school_id" });
-
-  schoolLog.status = "Fee schedule located in external PDF: " + detectedPdfUrl;
-} else {
-          schoolLog.status = "No numeric fee patterns found in page text or tables";
-        }
-      } catch (err: any) {
-        schoolLog.status = "Crawl failed: " + err.message;
+        if (detectedFigures.length > 0) schoolLog.status = "figures found (reported, not saved)";
+        else if (detectedPdfUrl) schoolLog.status = "fee schedule appears to be in a PDF: " + detectedPdfUrl;
+        else schoolLog.status = "no numeric fee patterns found in page text or tables";
+      } catch (err) {
+        schoolLog.status = "crawl failed: " + (err instanceof Error ? err.message : String(err));
       }
 
       logs.push(schoolLog);
     }
 
-    return new Response(JSON.stringify({ 
-      success: true, 
-      count: logs.length, 
-      details: logs 
-    }, null, 2), {
-      headers: { "Content-Type": "application/json" }
-    });
-  } catch (globalErr: any) {
-    return new Response(JSON.stringify({ 
-      success: false, 
-      error: globalErr.message 
-    }), { 
-      status: 500, 
-      headers: { "Content-Type": "application/json" } 
-    });
+    return json({ success: true, mode: "report-only (nothing written to school_fees)", count: logs.length, details: logs });
+  } catch (err) {
+    return json({ success: false, error: err instanceof Error ? err.message : String(err) }, 500);
   }
-}));
+});
