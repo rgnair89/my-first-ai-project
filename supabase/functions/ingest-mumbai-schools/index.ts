@@ -145,6 +145,45 @@ function takeLegacyMatch(pool: SchoolRow[], p: Place): SchoolRow | null {
   return i === -1 ? null : pool.splice(i, 1)[0];
 }
 
+// Words too common to prove two records are the same school (generic terms and neighbourhood names).
+const GENERIC_WORDS = new Set([
+  "school", "schools", "high", "junior", "senior", "primary", "secondary", "the", "of", "and", "mumbai",
+  "public", "english", "international", "academy", "college", "vidyalaya", "convent", "municipal", "bmc",
+  "pre", "nursery", "montessori", "foundation", "trust", "education", "educational", "institute", "west",
+  "east", "north", "south", "andheri", "bandra", "borivali", "chembur", "mulund", "thane", "parel",
+  "oshiwara", "malad", "goregaon", "kandivali", "dahisar", "powai", "sewri",
+]);
+
+function significantWords(name: string): string[] {
+  return normName(name).split(" ").filter((w) => w.length >= 3 && !GENERIC_WORDS.has(w));
+}
+
+function metersBetween(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const dLat = (lat1 - lat2) * 111320;
+  const dLng = (lng1 - lng2) * 111320 * Math.cos((lat1 * Math.PI) / 180);
+  return Math.hypot(dLat, dLng);
+}
+
+// Report only, never acts on it: would-be new schools that sit within 300 m of a stored school that this run
+// could not match, and share a distinctive word in the name. Catches renamed or moved listings.
+function findPossibleDuplicates(
+  inserts: { name: string; latitude: number; longitude: number }[],
+  unmatched: SchoolRow[],
+): { new: string; existing: string; existing_id: string }[] {
+  const out: { new: string; existing: string; existing_id: string }[] = [];
+  for (const ins of inserts) {
+    const words = significantWords(ins.name);
+    if (!words.length) continue;
+    const hit = unmatched.find(
+      (r) =>
+        metersBetween(ins.latitude, ins.longitude, Number(r.latitude), Number(r.longitude)) <= 300 &&
+        significantWords(r.name).some((w) => words.includes(w)),
+    );
+    if (hit) out.push({ new: ins.name, existing: hit.name, existing_id: hit.id });
+  }
+  return out;
+}
+
 function insertRow(p: Place, nowIso: string) {
   return {
     name: p.name,
@@ -162,11 +201,13 @@ function insertRow(p: Place, nowIso: string) {
 }
 
 // Existing rows only get Google-sourced fields refreshed; a website we already have is kept.
+// A rating is only written when Google actually returned one: "no rating in this response" must never
+// overwrite a rating we already hold.
 function updatePatch(existing: SchoolRow, p: Place, nowIso: string) {
   return {
     google_place_id: p.placeId,
-    google_rating: p.rating,
-    google_review_count: p.reviewCount,
+    ...(p.rating !== null ? { google_rating: p.rating } : {}),
+    ...(p.reviewCount !== null ? { google_review_count: p.reviewCount } : {}),
     website: existing.website ?? p.website,
     last_synced_at: nowIso,
   };
@@ -235,10 +276,12 @@ function createHandler(deps: Deps) {
       const toInsert: ReturnType<typeof insertRow>[] = [];
       const toUpdate: { id: string; patch: ReturnType<typeof updatePatch> }[] = [];
       const skippedExamples: string[] = [];
-      const zones: { zone: string; pages: number; fetched: number; kept: number; skipped: number }[] = [];
+      const zones: { zone: string; pages: number; fetched: number; kept: number; skipped: number; capped: boolean }[] = [];
+      let rated = 0;
+      let unrated = 0;
 
       for (const zone of MUMBAI_ZONES) {
-        const z = { zone: zone.name, pages: 0, fetched: 0, kept: 0, skipped: 0 };
+        const z = { zone: zone.name, pages: 0, fetched: 0, kept: 0, skipped: 0, capped: false };
         let pageToken: string | undefined;
 
         for (let page = 0; page < MAX_PAGES_PER_ZONE; page++) {
@@ -264,6 +307,7 @@ function createHandler(deps: Deps) {
             if (seen.has(p.placeId)) continue;
             seen.add(p.placeId);
             z.kept++;
+            if (p.rating !== null) rated++; else unrated++;
 
             const existing = byPlaceId.get(p.placeId) ?? takeLegacyMatch(legacy, p);
             if (existing) toUpdate.push({ id: existing.id, patch: updatePatch(existing, p, nowIso) });
@@ -274,9 +318,13 @@ function createHandler(deps: Deps) {
           if (!pageToken) break;
         }
 
+        z.capped = Boolean(pageToken); // Google still had more results after the 3rd page: this zone is truncated
         zones.push(z);
         await deps.sleep(300); // pacing between zones
       }
+
+      // `legacy` now holds only stored schools this run could not match to a Google result
+      const possibleDuplicates = findPossibleDuplicates(toInsert, legacy);
 
       const errors: string[] = [];
       let inserted = 0;
@@ -311,6 +359,9 @@ function createHandler(deps: Deps) {
         updated,
         skipped_not_school: zones.reduce((n, z) => n + z.skipped, 0),
         skipped_examples: skippedExamples,
+        ratings: { with_rating: rated, without_rating: unrated },
+        stored_but_unmatched: { count: legacy.length, examples: legacy.slice(0, 10).map((r) => r.name) },
+        possible_duplicates: { count: possibleDuplicates.length, examples: possibleDuplicates.slice(0, 10) },
         zones,
         errors: errors.slice(0, 20),
         ...(dryRun ? { sample: { insert: toInsert.slice(0, 3), update: toUpdate.slice(0, 3) } } : {}),
