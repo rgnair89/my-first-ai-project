@@ -8,7 +8,8 @@ export const SWEEP_BOUNDS = { south: 18.88, north: 19.32, west: 72.76, east: 73.
 export const STEP = 0.03; // about 3.3 km
 export const BATCH_SIZE = 6; // cells per function call (the function accepts at most 8)
 export const MAX_DEPTH = 3; // a crowded cell is split into quarters at most 3 times (about 400 m)
-export const MAX_REQUESTS = 1200; // hard stop on Google requests for one sweep
+export const MAX_REQUESTS = 2000; // hard stop on Google requests for one sweep
+export const BUDGET_TOP_UP = 500; // extra requests the admin can approve after the limit is reached
 
 const r5 = (n) => Math.round(n * 1e5) / 1e5;
 

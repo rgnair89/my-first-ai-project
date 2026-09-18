@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { supabase } from '@/utils/supabase';
-import { buildGrid, testCells, runSweep, emptyTotals, mergeTotals, MAX_REQUESTS } from './sweep';
+import { buildGrid, testCells, runSweep, emptyTotals, mergeTotals, MAX_REQUESTS, BUDGET_TOP_UP } from './sweep';
 
 // supabase-js sends the signed-in admin's session; the function checks the admin role itself.
 async function invoke(body) {
@@ -18,6 +18,8 @@ export default function SweepPanel() {
   const queue = useRef([]); // cells still to search; survives a stop so the sweep can resume
   const done = useRef(emptyTotals()); // totals from earlier runs of this sweep
   const stopRequested = useRef(false);
+  const budget = useRef(MAX_REQUESTS); // Google requests this sweep may use in total
+  const [limit, setLimit] = useState(MAX_REQUESTS); // the same number, kept in state so the screen can show it
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(null);
   const [left, setLeft] = useState(0);
@@ -37,15 +39,22 @@ export default function SweepPanel() {
       fresh &&
       !window.confirm(
         `This starts the full grid sweep of Mumbai, Thane and Navi Mumbai.\n\n` +
-          `Expect roughly 500-900 Google Places requests (it stops by itself at ${MAX_REQUESTS}), about $15-40 at Google's list price, and 5-15 minutes. ` +
-          `Keep this tab open. If it stops for any reason, press Resume.\n\nContinue?`,
+          `Expect roughly 800-1,500 Google Places requests (about $30-55 at Google's list price, and 10-20 minutes). ` +
+          `It stops by itself at ${MAX_REQUESTS} requests (about $70). Keep this tab open. If it stops for any reason, press Resume.\n\nContinue?`,
       )
     ) {
       return;
     }
+    if (!fresh && done.current.stopped?.includes('budget')) {
+      if (!window.confirm(`The sweep stopped at its limit of ${budget.current} Google requests.\n\nAllow ${BUDGET_TOP_UP} more (about $${Math.round(BUDGET_TOP_UP * 0.035)})?`)) return;
+      budget.current += BUDGET_TOP_UP;
+      setLimit(budget.current);
+    }
     if (fresh) {
       queue.current = buildGrid();
       done.current = emptyTotals();
+      budget.current = MAX_REQUESTS;
+      setLimit(MAX_REQUESTS);
       setProgress(null);
     }
     stopRequested.current = false;
@@ -55,7 +64,7 @@ export default function SweepPanel() {
       queue: queue.current,
       invoke,
       dryRun: false,
-      maxRequests: MAX_REQUESTS - done.current.requests,
+      maxRequests: budget.current - done.current.requests,
       shouldStop: () => stopRequested.current,
       onProgress: (p) => {
         setProgress(mergeTotals(done.current, p));
@@ -123,7 +132,7 @@ export default function SweepPanel() {
             <div className="bg-blue-600 h-2 rounded" style={{ width: `${pct}%` }} />
           </div>
           <p>Cells searched: <b>{progress.cells}</b> · still queued: <b>{left}</b> · split into finer cells: <b>{progress.splits}</b></p>
-          <p>Google requests used: <b>{progress.requests}</b> of {MAX_REQUESTS} maximum</p>
+          <p>Google requests used: <b>{progress.requests}</b> of {limit} maximum</p>
           <p>New schools added: <b>{progress.inserted}</b> · existing schools linked or refreshed: <b>{progress.updated}</b></p>
           {progress.unresolved > 0 && (
             <p className="text-amber-700">Cells still too crowded at the finest level: {progress.unresolved} (some schools there may be missing)</p>

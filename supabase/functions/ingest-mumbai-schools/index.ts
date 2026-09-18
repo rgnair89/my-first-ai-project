@@ -29,7 +29,7 @@ const MUMBAI_ZONES = [
 
 const PLACES_URL = "https://places.googleapis.com/v1/places:searchText";
 const FIELD_MASK =
-  "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.websiteUri,places.types,nextPageToken";
+  "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.websiteUri,places.types,places.primaryType,places.businessStatus,nextPageToken";
 const MAX_PAGES_PER_ZONE = 3; // Google returns at most 20 places per page and 60 per query
 
 // ---- BEGIN admin-auth (identical in every function) ----
@@ -70,6 +70,8 @@ type Place = {
   reviewCount: number | null;
   website: string | null;
   types: string[];
+  primaryType: string | null;
+  businessStatus: string | null;
 };
 
 type SchoolRow = {
@@ -132,6 +134,8 @@ function normalizePlace(place: any): Place | null {
     reviewCount: typeof place.userRatingCount === "number" ? place.userRatingCount : null,
     website: place.websiteUri ?? null,
     types: Array.isArray(place.types) ? place.types : [],
+    primaryType: place.primaryType ?? null,
+    businessStatus: place.businessStatus ?? null,
   };
 }
 
@@ -197,6 +201,9 @@ function insertRow(p: Place, nowIso: string) {
     google_place_id: p.placeId,
     google_rating: p.rating,
     google_review_count: p.reviewCount,
+    google_types: p.types, // kept so schools can be classified (preschool vs K-12) later without crawling again
+    google_primary_type: p.primaryType,
+    google_business_status: p.businessStatus,
     board: detectBoard(p.name),
     admissions_open: null, // unknown until read from the school's own site
     last_synced_at: nowIso,
@@ -211,6 +218,9 @@ function updatePatch(existing: SchoolRow, p: Place, nowIso: string) {
     google_place_id: p.placeId,
     ...(p.rating !== null ? { google_rating: p.rating } : {}),
     ...(p.reviewCount !== null ? { google_review_count: p.reviewCount } : {}),
+    google_types: p.types,
+    google_primary_type: p.primaryType,
+    google_business_status: p.businessStatus,
     website: existing.website ?? p.website,
     last_synced_at: nowIso,
   };
@@ -350,10 +360,17 @@ function createHandler(deps: Deps) {
             }
             if (seen.has(p.placeId)) continue;
             seen.add(p.placeId);
+
+            const existing = byPlaceId.get(p.placeId) ?? takeLegacyMatch(legacy, p);
+            // Never add a school that has shut down. One we already hold still gets its status updated below.
+            if (!existing && p.businessStatus === "CLOSED_PERMANENTLY") {
+              z.skipped++;
+              if (skippedExamples.length < 10) skippedExamples.push(`${p.name} (permanently closed)`);
+              continue;
+            }
             z.kept++;
             if (p.rating !== null) rated++; else unrated++;
 
-            const existing = byPlaceId.get(p.placeId) ?? takeLegacyMatch(legacy, p);
             if (existing) toUpdate.push({ id: existing.id, patch: updatePatch(existing, p, nowIso) });
             else toInsert.push(insertRow(p, nowIso));
           }
