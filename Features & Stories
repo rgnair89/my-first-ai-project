@@ -1,80 +1,120 @@
 # Product Requirements Document (PRD): Kidscover — Feature & User Story Breakdown
 
 **Author:** Rajasekharan Gopakumar
-**Document Status:** Draft (MVP Phase)
+**Document Status:** v1.1 — MVP built; each story marked Built, Partly built or Planned
+**Last Updated:** 19 September 2026
 
 ---
 
 ## Feature 1: User Authentication & Profile Management
 
-**Description:** Enabling secure access and personalization for parents and school administrators.
+**Description:** Secure access and personalisation for parents, school staff and Kidscover admins.
 
 ### Frontend User Stories
-- **US1.1 (Parent/Admin):** As a user, I want to sign up and log in using my phone number (OTP), Google, Microsoft, or Email account so that I can securely access the app without remembering a new password.
-- **US1.2 (Parent/Admin):** As a user, I want to upload a profile picture or select a stock cartoon avatar so that I can personalize my account.
-- **US1.3 (Parent):** As a user, I want to manage my app settings (Dark Mode, Push Notifications, Biometric Login, Language) so that the app matches my device preferences.
+- **US1.1 (Parent/Admin) — Partly built:** As a user, I want to sign up and log in using my phone number (OTP), Google, Microsoft, or Email account so that I can securely access the app without remembering a new password. *Email + password is built; Google, Microsoft and OTP are planned.*
+- **US1.2 (Parent/Admin) — Planned:** As a user, I want to upload a profile picture or select a stock cartoon avatar so that I can personalise my account.
+- **US1.3 (Parent) — Planned:** As a user, I want to manage my app settings (Dark Mode, Push Notifications, Biometric Login, Language) so that the app matches my device preferences.
 
 ### Backend User Stories
-- **US1.4 (Backend):** As a system, I need to integrate with OAuth providers (Google, Microsoft) and an SMS gateway (for OTP) to authenticate users securely and generate session tokens.
-- **US1.5 (Backend):** As a system, I need to securely store user profile data (Name, Gender, Email, Phone, Encrypted Address Book) in the database and expose REST/GraphQL endpoints for the frontend to perform CRUD operations.
+- **US1.4 (Backend) — Partly built:** As a system, I need to integrate with OAuth providers (Google, Microsoft) and an SMS gateway (for OTP) to authenticate users securely and generate session tokens. *Supabase Auth with email is built.*
+- **US1.5 (Backend) — Built:** As a system, I need to securely store user profile data and let each user edit only their own name and phone; roles (parent, school_admin, admin) are set by the system only.
 
 ---
 
 ## Feature 2: Location-Based Dashboard & Commute Search
 
-**Description:** The core discovery engine utilizing real-world commute times rather than straight-line distance.
+**Description:** Discovery by real distance and drive time rather than guesswork.
 
 ### Frontend User Stories
-- **US2.1 (Parent):** As a parent, I want the app to automatically detect my location (falling back to address book, then last session, then manual entry) so that I immediately see schools relevant to my area.
-- **US2.2 (Parent):** As a parent, I want to see dashboard tiles showing the number of available schools, open admissions, and closed admissions in my area so that I understand the current landscape at a glance.
-- **US2.3 (Parent):** As a parent, I want to input my desired commute time and see an auto-calculated "Arrive By" time (e.g., 8:15 AM for an 8:30 AM start) so I know exactly when my child needs to leave home.
-- **US2.4 (Parent):** As a parent, I want to filter search results by educational board (CBSE, ICSE, etc.), school age, and Total Cost of Ownership (TCO) so that I only see viable options.
+- **US2.1 (Parent) — Partly built:** As a parent, I want the app to use my location so that I immediately see schools near me, with the distance on each and "nearest first". *Built with GPS; the fallback to address book / last session is planned.*
+- **US2.2 (Parent) — Planned:** As a parent, I want dashboard tiles showing the number of schools, open admissions and closed admissions in my area.
+- **US2.3 (Parent) — Partly built:** As a parent, I want to see how long the drive to each school takes at school-run time. *Built: "Weekday 7:30 am" and "Right now" drive times; an "Arrive By" time from each school's start time is planned.*
+- **US2.4 (Parent) — Partly built:** As a parent, I want to filter by board, level, daycare, rating and distance so that I only see viable options. *Built; the TCO filter and school-age filter are planned.*
 
 ### Backend User Stories
-- **US2.5 (Backend):** As a system, I need to query the Google Maps Distance Matrix API using the user's coordinates and the school's coordinates, factoring in morning traffic conditions, to return accurate commute times.
-- **US2.6 (Backend):** As a system, I need to aggregate fee data (tuition, transport, cafeteria, uniform, admission fees) from the database into a single TCO integer for the frontend to filter against.
+- **US2.5 (Backend) — Built:** As a system, I need to query the Google Routes API with the parent's rounded position and the schools' coordinates, traffic-aware, within daily limits per parent and for the whole app, storing nothing but a daily count.
+- **US2.6 (Backend) — Planned:** As a system, I need to aggregate fee data into a single TCO figure for filtering.
+- **US2.7 (Backend) — Built:** As a system, I need a distance function that returns each visible school's straight-line distance, so near-me lists can be filtered and sorted in the database.
 
 ---
 
 ## Feature 3: School Marketplace & Detail Pages
 
-**Description:** Comprehensive data presentation for individual schools and comparison tools.
+**Description:** A trustworthy school page, every fact with its source.
 
 ### Frontend User Stories
-- **US3.1 (Parent):** As a parent, I want to view a detailed school profile showing enrollment numbers, board results, university placements, facilities, and aggregated Google ratings so that I can evaluate the school's quality.
-- **US3.2 (Parent):** As a parent, I want to see a full breakdown of the fees that make up the Total Cost of Ownership (TCO) so I am not surprised by hidden charges.
-- **US3.3 (Parent):** As a parent, I want to select up to 4 schools and view them in a side-by-side comparison matrix covering all attributes.
+- **US3.1 (Parent) — Built:** As a parent, I want a school page with its photo, levels, board, admission status, Google rating, facilities and achievements, each saying where it came from, so I can judge the school.
+- **US3.2 (Parent) — Planned:** As a parent, I want a full breakdown of the fees that make up the TCO.
+- **US3.3 (Parent) — Planned:** As a parent, I want to compare up to 4 schools side by side.
+- **US3.6 (Parent) — Built:** As a parent, I want schools, after-school classes and colleges kept apart, so the main list holds only schools from preschool to class 12.
+- **US3.7 (Parent) — Built:** As a parent, I want a friendly, colourful app with a picture on every school (its photo, or a drawing when there is none).
 
 ### Backend User Stories
-- **US3.4 (Backend):** As a system, I need an endpoint that delivers full school profile data, structured facility tags, and aggregated rating scores to the client.
-- **US3.5 (Backend):** As a system, I need a scheduled background job to pull and update aggregated public review scores (e.g., Google Places API) for listed schools.
+- **US3.4 (Backend) — Built:** As a system, I need to deliver full school profile data: facilities, achievements, photo with credit, and facts with their sources.
+- **US3.5 (Backend) — Built:** As a system, I need to import Google Places data (ratings, types, location) for the market's schools.
+- **US3.8 (Backend) — Built:** As a system, I need to sort every place into school / after-school class / college, and hide places not for children, from the name first and Google's type second, with admin overrides.
 
 ---
 
 ## Feature 4: Admissions & Enquiry Gateway
 
-**Description:** The hybrid application system connecting parents to schools.
+**Description:** Connecting parents to schools.
 
 ### Frontend User Stories
-- **US4.1 (Parent):** As a parent viewing a "Partner School," I want to fill out a standard Kidscover admission form (Parent details, Ward details, Address) directly in the app.
-- **US4.2 (Parent):** As a parent viewing a "Non-Partner School," I want a button that redirects me to their official admission portal.
-- **US4.3 (School Admin):** As a school admissions user, I want a dashboard to view incoming applications submitted via the Kidscover standard form.
+- **US4.1 (Parent) — Partly built:** As a parent, I want to ask a school about admissions (class, roughly when, my question) and continue the conversation in the app. *Built as enquiries; the full Kidscover Standard application form is planned.*
+- **US4.2 (Parent) — Built:** As a parent viewing a school, I want a link to its own website.
+- **US4.3 (School Admin) — Partly built:** As a school admissions user, I want a dashboard of incoming enquiries and applications. *The enquiry inbox is built for Kidscover staff; access for partner schools' own staff is planned.*
 
 ### Backend User Stories
-- **US4.4 (Backend):** As a system, I need to process submitted Kidscover standard forms and trigger a webhook/API call to securely transmit the payload to the specific Partner School's CRM system.
-- **US4.5 (Backend):** As a system, I need to log the outbound clicks to Non-Partner schools for internal analytics and lead-tracking purposes.
+- **US4.4 (Backend) — Planned:** As a system, I need to push the Kidscover Standard form to a partner school's CRM by webhook.
+- **US4.5 (Backend) — Planned:** As a system, I need to log outbound clicks to non-partner schools.
+- **US4.6 (Backend) — Built:** As a system, I need enquiry limits (one open enquiry per school, 10 new a day, confirmed email) and no child data in an enquiry.
 
 ---
 
 ## Feature 5: Ticketing & Notifications
 
-**Description:** Secure, two-way communication channel.
+**Description:** Secure, two-way communication.
 
 ### Frontend User Stories
-- **US5.1 (Parent):** As a parent, I want to open a chat/ticket with a partner school's admission team to ask questions without sharing my personal phone number.
-- **US5.2 (School Admin):** As a school admissions user, I want to reply to parent tickets within a dedicated portal interface.
-- **US5.3 (Parent):** As a parent, I want to receive push notifications when a school replies to my ticket or when there is an update on my admission application.
+- **US5.1 (Parent) — Built:** As a parent, I want to message a school without sharing my phone number, and see how many replies I have not read.
+- **US5.2 (School Admin) — Partly built:** As an admissions user, I want to reply to parents in the portal. *Built for Kidscover staff.*
+- **US5.3 (Parent) — Planned:** As a parent, I want push notifications when a school replies.
 
 ### Backend User Stories
-- **US5.4 (Backend):** As a system, I need a secure messaging schema to store chat tickets, associating them with a masked parent ID and the specific school ID.
-- **US5.5 (Backend):** As a system, I need to integrate with a Push Notification service (e.g., Firebase Cloud Messaging / APNs) to trigger alerts based on database status changes in the ticketing or admissions table.
+- **US5.4 (Backend) — Built:** As a system, I need a messaging schema tying each conversation to the parent and the school, with read marks for both sides.
+- **US5.5 (Backend) — Planned:** As a system, I need push notifications (Firebase Cloud Messaging / APNs) triggered by replies and status changes.
+
+---
+
+## Feature 6: Parent Reviews & Moderation — Built
+
+- **US6.1 (Parent):** As a parent, I want to write an anonymous review (rating, text, how I know the school), edit or delete it, and report others' reviews.
+- **US6.2 (Kidscover Admin):** As a moderator, I want to publish or reject pending reviews and handle reports, so only fair reviews show.
+- **US6.3 (Backend):** As a system, I need one review per parent per school, pending until published, and a confirmed email to write or report.
+
+---
+
+## Feature 7: School Data from School Websites — Built
+
+- **US7.1 (Kidscover Admin):** As an admin, I want the system to read each school's own website and suggest its board, levels, admission status, facilities and claimed achievements, each with the sentence and page it came from.
+- **US7.2 (Kidscover Admin):** As an admin, I want to accept or reject each suggestion (strong ones ticked, weak ones not), and accept CBSE boards confirmed by CBSE's record in bulk.
+- **US7.3 (Backend):** As a system, I need to read politely (robots.txt, a few pages, size and time limits), safely (no private addresses, redirects re-checked), and in English, Marathi and Hindi; to confirm CBSE affiliation numbers against CBSE's record; and never to overwrite what a school entered itself.
+- **US7.4 (Parent):** As a parent, I want to see where each fact came from and when it was checked.
+
+---
+
+## Feature 8: School Profiles, School Staff & the Change Log — Built
+
+- **US8.1 (Kidscover Admin):** As an admin, I want to give a school's staff access to edit their own school's page, by email.
+- **US8.2 (School Admin):** As a school's staff member, I want to upload our photo (confirming we may publish it), list our facilities (with details such as our teacher-student ratio) and our achievements (results, placements, alumni, awards), and see our change history.
+- **US8.3 (Kidscover Admin):** As an admin, I want to see every change any school makes (who, when, before and after) and undo any of them, so the data stays accurate.
+- **US8.4 (Kidscover Admin):** As an admin, I want to find free-licensed photos of a school on Wikimedia Commons and use one with its author and licence.
+- **US8.5 (Backend):** As a system, I need the change log written by database triggers (so nothing escapes it), edits allowed only through functions that check the school, and a photo bucket where each school can write only to its own folder.
+
+---
+
+## Feature 9: Categories — Built
+
+- **US9.1 (Kidscover Admin):** As an admin, I want to see which places the rules put in After-school classes, Colleges or Hidden (with the reason), and move any single place with one click.
+- **US9.2 (Parent):** As a parent, I want After-school classes and Colleges as separate lists, one tap away, with filters that make sense for each.
