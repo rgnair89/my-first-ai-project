@@ -9,8 +9,8 @@ export const VIEWS = [
 ];
 
 export const FINDING_SELECT =
-  'id, school_id, checked_at, website, pages, boards, admission, error, review_status, reviewed_at, review_note, ' +
-  'schools(name, board, boards, website, admissions_open, admissions_year)';
+  'id, school_id, checked_at, website, pages, boards, levels, admission, error, review_status, reviewed_at, review_note, ' +
+  'schools(name, board, boards, levels, website, admissions_open, admissions_year)';
 
 export const BATCH = 6;             // schools per call of the reader (it allows up to 10)
 export const SESSION_CAP = 300;     // a run stops by itself after this many schools; press Start again to go on
@@ -24,9 +24,11 @@ export function normalizeFinding(row) {
     schoolId: row.school_id,
     school: school.name ?? '(school no longer listed)',
     currentBoard: school.board ?? '',
+    currentLevels: Array.isArray(school.levels) ? school.levels : [],
     website: row.website ?? school.website ?? '',
     checkedAt: row.checked_at ?? '',
     boards: Array.isArray(row.boards) ? row.boards : [],
+    levels: Array.isArray(row.levels) ? row.levels : [],
     admission: row.admission ?? null,
     pages: Array.isArray(row.pages) ? row.pages : [],
     error: row.error ?? '',
@@ -37,10 +39,12 @@ export function normalizeFinding(row) {
 
 export const isConfirmed = (hit) => hit?.verified?.confirmed === true;
 
-// What is ticked when a finding is first shown: strong or CBSE-confirmed boards, and a dated, current admission notice.
+// What is ticked when a finding is first shown: strong or CBSE-confirmed boards, strong levels, and a dated, current
+// admission notice.
 export function defaultChoice(f) {
   return {
     boards: f.boards.filter((b) => b.strong || isConfirmed(b)).map((b) => b.board),
+    levels: (f.levels ?? []).filter((l) => l.strong).map((l) => l.level),
     admission: !!(f.admission && !f.admission.stale && f.admission.year),
   };
 }
@@ -50,6 +54,10 @@ export function boardLabel(hit) {
   if (hit.verified && hit.verified.confirmed === false) return `${hit.board} - NOT confirmed: ${(hit.verified.reasons ?? []).join(', ')}`;
   return `${hit.board}${hit.strong ? '' : ' (weak: only mentioned)'}`;
 }
+
+export const LEVEL_NAMES = { daycare: 'Daycare', preschool: 'Preschool (nursery, KG)', primary: 'Primary (classes 1 to 7)', secondary: 'Secondary (classes 8 to 12)' };
+export const levelLabel = (hit) => `${LEVEL_NAMES[hit.level] ?? hit.level}${hit.strong ? '' : ' (weak: only mentioned)'}`;
+export const levelsText = (levels) => (levels?.length ? levels.map((l) => (LEVEL_NAMES[l] ?? l).replace(/ \(.*\)$/, '')).join(', ') : 'not stated');
 
 export function admissionLabel(a) {
   if (!a) return '';
@@ -62,8 +70,10 @@ export function admissionLabel(a) {
 export function reviewCall(f, choice, note) {
   const found = new Set(f.boards.map((b) => b.board));
   const boards = [...new Set(choice.boards ?? [])].filter((b) => found.has(b));
+  const foundLevels = new Set((f.levels ?? []).map((l) => l.level));
+  const levels = [...new Set(choice.levels ?? [])].filter((l) => foundLevels.has(l));
   if (choice.admission && (!f.admission || f.admission.stale)) return { error: 'That admission notice cannot be used.' };
-  return { p_finding: f.id, p_boards: boards, p_use_admission: !!choice.admission, p_note: (note ?? '').trim() || null };
+  return { p_finding: f.id, p_boards: boards, p_use_admission: !!choice.admission, p_note: (note ?? '').trim() || null, p_levels: levels };
 }
 
 // Pending findings whose CBSE board is confirmed by CBSE's own record: safe to accept in one go (the board only).
@@ -80,6 +90,7 @@ export function progressLine(p) {
 export function friendlyError(error) {
   const msg = String(error?.message ?? error ?? '');
   if (/admin only|admin_only|permission denied|row-level security/i.test(msg)) return 'Only admins can do this.';
+  if (/school_site_findings\.levels|site_levels|p_levels|20260919001100/i.test(msg)) return 'Run the 20260919001100_levels_from_websites.sql migration first.';
   if (/not_configured|20260919000800|last_site_check_at|school_site_findings|schema cache/i.test(msg)) return 'Run the 20260919000800_school_website_findings.sql migration first.';
   if (/404|not found/i.test(msg) && /function/i.test(msg)) return 'The read-school-websites function is not deployed yet.';
   if (/already dealt with/i.test(msg)) return 'Someone already decided on this one. Refresh the list.';

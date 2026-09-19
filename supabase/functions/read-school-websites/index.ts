@@ -1,16 +1,18 @@
 // supabase/functions/read-school-websites/index.ts
 //
-// Reads schools' own websites for two facts: which board they follow, and whether admissions are open. For CBSE, an
+// Reads schools' own websites for three facts: which board they follow, which levels they run (preschool, primary,
+// secondary, daycare), and whether admissions are open. For CBSE, an
 // affiliation number the school gives is checked against CBSE's public record for that number. Everything found goes
 // into school_site_findings for an admin to accept or reject in the Partner Portal: nothing reaches parents unchecked.
 // Self-contained: paste this whole file into the dashboard editor as a new function called "read-school-websites".
 //
-// Before it can work: run supabase/migrations/20260919000800_school_website_findings.sql. No secrets are needed: the
+// Before it can work: run supabase/migrations/20260919000800_school_website_findings.sql and, for levels,
+// 20260919001100_levels_from_websites.sql. Only places in the "school" category are read (20260919001000). No secrets are needed: the
 // function acts AS THE ADMIN who pressed the button (their sign-in), so only admins can run it.
 //
 // Request (POST): { "limit": 6, "dryRun": false }            -> the next schools whose website was not read recently
 //                 { "schoolIds": ["uuid", ...] }             -> exactly these (max 10)
-// Answer: { ok, processed, withFindings, errors, remaining, stoppedEarly, results: [{ school, website, boards, admission, error }] }
+// Answer: { ok, processed, withFindings, errors, remaining, stoppedEarly, results: [{ school, website, boards, levels, admission, error }] }
 //
 // Manners: identifies itself as KidscoverBot, obeys robots.txt, reads at most 3 pages per school (the home page and
 // the two most likely to state the board or admissions), 1.5 MB and 10 seconds per page, 3 schools at a time.
@@ -305,6 +307,111 @@ function mergeBoards(perPage: BoardHit[][]): BoardHit[] {
     .slice(0, 6);
 }
 
+// ---- levels ----
+// Which of the app's levels a school's own site says it runs: daycare, preschool (nursery, KG), primary (classes 1 to 7)
+// and secondary (classes 8 to 12, junior college included). A range is the clearest ("Nursery to Grade 10", "Classes I
+// to X", Marathi "iyatta 5 vi te 10 vi"): 5 points for every level in it. A named section ("Primary section", "Junior
+// College") is 3; a class on its own ("Class 10 results") or a plain preschool word ("Nursery") is 2, and counts at most
+// twice. "Primary" or "secondary" alone ("our primary aim") counts for nothing.
+type LevelHit = { level: string; score: number; strong: boolean; evidence: string; url: string };
+const LEVEL_ORDER = ["daycare", "preschool", "primary", "secondary"];
+
+const PRE = String.raw`pre[- ]?nursery|nursery|play[- ]?group|play[- ]?school|pre[- ]?primary|pre[- ]?school|kindergarten|montessori|jr\.?\s?k\.?\s?g\b\.?|sr\.?\s?k\.?\s?g\b\.?|l\.?k\.?g\b\.?|u\.?k\.?g\b\.?|k\.?g\b\.?`;
+const CLASS = String.raw`(?:class(?:es)?|grades?|std\.?|stds\.?|standards?)`;
+const NUM = String.raw`1[0-2]|[1-9]|xii|xi|x|ix|viii|vii|vi|v|iv|iii|ii|i`;
+const RANGE_RE = new RegExp(String.raw`\b(?:(${PRE})|${CLASS}\s*(${NUM})(?:st|nd|rd|th)?)\s*(?:to|till|until|up\s?to|through|-)\s*(?:(${PRE})|(?:${CLASS}\s*)?(${NUM})(?:st|nd|rd|th)?)\b`, "gi");
+const ONE_CLASS_RE = new RegExp(String.raw`\b${CLASS}\s*(${NUM})(?:st|nd|rd|th)?\b`, "gi");
+// Marathi and Hindi: "iyatta 1 li te 10 vi", "kaksha 1 se 10", "balwadi te iyatta 4 thi", with either kind of digit
+const DEV_NUM = "1[0-2]|[1-9]|\u0967[\u0966-\u0968]|[\u0967-\u096f]";
+const DEV_PRE = "\u092c\u093e\u0932\u0935\u093e\u0921\u0940|\u0936\u093f\u0936\u0941\\s?\u0935\u0930\u094d\u0917|\u0928\u0930\u094d\u0938\u0930\u0940|\u092a\u0942\u0930\u094d\u0935\\s?[- ]?\\s?\u092a\u094d\u0930\u093e\u0925\u092e\u093f\u0915|\u0915\u0947\\.?\\s?\u091c\u0940\\.?";
+const DEV_RANGE_RE = new RegExp(`(?:(${DEV_PRE})|(?:\u0907\u092f\u0924\u094d\u0924\u093e|\u0915\u0915\u094d\u0937\u093e)\\s*(${DEV_NUM}))\\s*(?:\u0932\u0940|\u0930\u0940|\u0925\u0940|\u0935\u0940|\u0935\u0940\u0902)?\\s*(?:\u0924\u0947|\u0938\u0947)\\s*(?:\u0907\u092f\u0924\u094d\u0924\u093e\\s*|\u0915\u0915\u094d\u0937\u093e\\s*)?(${DEV_NUM})`, "g");
+
+const ROMAN: Record<string, number> = { i: 1, ii: 2, iii: 3, iv: 4, v: 5, vi: 6, vii: 7, viii: 8, ix: 9, x: 10, xi: 11, xii: 12 };
+function classNumber(s: string): number | null {
+  const t = s.toLowerCase().replace(/[\u0966-\u096f]/g, (d) => String(d.charCodeAt(0) - 0x0966));
+  const n = /^\d+$/.test(t) ? Number(t) : ROMAN[t] ?? null;
+  return n !== null && n >= 1 && n <= 12 ? n : null;
+}
+const levelOfClass = (n: number) => (n <= 7 ? "primary" : "secondary");
+
+// The levels a range covers: from preschool or class a, to preschool or class b. Null when it makes no sense.
+function rangeLevels(fromPre: boolean, a: number | null, toPre: boolean, b: number | null): string[] | null {
+  if (toPre) return fromPre ? ["preschool"] : null;
+  if (b === null) return null;
+  const start = fromPre ? 1 : a;
+  if (start === null) return null;
+  const out = new Set<string>(fromPre ? ["preschool"] : []);
+  for (let k = start; k <= b; k++) out.add(levelOfClass(k));
+  return out.size ? [...out] : null; // backwards ("Class 10 to 5") comes out empty
+}
+
+const LEVEL_RULES: [string, RegExp, number, boolean?][] = [
+  ["daycare", /\b(?:day[- ]?care|cr[e\u00e8]che)\b/i, 3],
+  ["daycare", /\u092a\u093e\u0933\u0923\u093e\u0918\u0930|\u0921\u0947\s?\u0915\u0947\u0905\u0930/, 3],
+  ["preschool", /\b(?:pre[- ]?primary|kindergarten|pre[- ]?school|play[- ]?group|montessori|nursery)\s+(?:section|wing|school|classes|programme|program|department)\b/i, 4],
+  ["preschool", /\b(?:pre[- ]?nursery|nursery|play[- ]?group|pre[- ]?primary|kindergarten|jr\.?\s?k\.?\s?g\b|sr\.?\s?k\.?\s?g\b|l\.?k\.?g\b|u\.?k\.?g\b)/i, 2, true],
+  ["preschool", /\u092a\u0942\u0930\u094d\u0935\s?[- ]?\s?\u092a\u094d\u0930\u093e\u0925\u092e\u093f\u0915|\u092c\u093e\u0932\u0935\u093e\u0921\u0940|\u0936\u093f\u0936\u0941\s?\u0935\u0930\u094d\u0917/, 3],
+  ["primary", /(?<!pre[- ]?)\bprimary\s+(?:section|wing|school|classes|department|block|years)\b|\b(?:lower|upper)\s+primary\b/i, 3],
+  ["primary", /(?<!\u092a\u0942\u0930\u094d\u0935\s?[- ]?\s?)\u092a\u094d\u0930\u093e\u0925\u092e\u093f\u0915\s*(?:\u0935\u093f\u092d\u093e\u0917|\u0936\u093e\u0933\u093e|\u0935\u0930\u094d\u0917)/, 3],
+  ["secondary", /\b(?:secondary|high)\s+(?:section|wing|school|classes|department)\b|\bhigher\s+secondary\b|\b(?:junior|jr\.?)\s?college\b/i, 3],
+  ["secondary", /\b(?:S\.?S\.?C\.?|H\.?S\.?C\.?|board)\s+(?:results?|exams?|examinations?|batch)\b/i, 3],
+  ["secondary", /(?:\u0909\u091a\u094d\u091a\s*)?\u092e\u093e\u0927\u094d\u092f\u092e\u093f\u0915\s*(?:\u0935\u093f\u092d\u093e\u0917|\u0936\u093e\u0933\u093e|\u0935\u0930\u094d\u0917)|\u0915\u0928\u093f\u0937\u094d\u0920\s*\u092e\u0939\u093e\u0935\u093f\u0926\u094d\u092f\u093e\u0932\u092f/, 3],
+];
+
+function findLevels(text: string, url: string): LevelHit[] {
+  const acc = new Map<string, { score: number; best: number; evidence: string; plain: number }>();
+  const add = (level: string, points: number, sent: string, inSentence: Map<string, number>, plain = false) => {
+    const cur = acc.get(level) ?? { score: 0, best: 0, evidence: "", plain: 0 };
+    if (plain) {
+      if (cur.plain >= 2) return; // plain mentions add at most twice
+      cur.plain += 1;
+    }
+    cur.score += points;
+    const here = (inSentence.get(level) ?? 0) + points;
+    inSentence.set(level, here);
+    if (here > cur.best) { cur.best = here; cur.evidence = clip(sent); }
+    acc.set(level, cur);
+  };
+  for (const sent of sentences(text)) {
+    const here = new Map<string, number>();
+    const ranged = new Set<string>(); // levels a range in this sentence gave (each once)
+    for (const m of sent.matchAll(RANGE_RE)) {
+      for (const l of rangeLevels(!!m[1], m[2] ? classNumber(m[2]) : null, !!m[3], m[4] ? classNumber(m[4]) : null) ?? []) ranged.add(l);
+    }
+    for (const m of sent.matchAll(DEV_RANGE_RE)) {
+      for (const l of rangeLevels(!!m[1], m[2] ? classNumber(m[2]) : null, false, classNumber(m[3])) ?? []) ranged.add(l);
+    }
+    for (const l of ranged) add(l, 5, sent, here);
+    // a class or a preschool word on its own counts only for a level no range in the sentence gave
+    // ("Nursery to Grade 10" is one statement, not three; "Nursery and Class 1 to 4" still counts the nursery)
+    for (const m of sent.matchAll(ONE_CLASS_RE)) {
+      const n = classNumber(m[1]);
+      if (n !== null && !ranged.has(levelOfClass(n))) add(levelOfClass(n), 2, sent, here, true);
+    }
+    for (const [level, re, points, plain] of LEVEL_RULES) {
+      if (plain && ranged.has(level)) continue;
+      if (re.test(sent)) add(level, points, sent, here, !!plain);
+    }
+  }
+  return [...acc.entries()].map(([level, v]) => ({ level, score: v.score, strong: v.score >= STRONG, evidence: v.evidence, url }));
+}
+
+function mergeLevels(perPage: LevelHit[][]): LevelHit[] {
+  const out = new Map<string, LevelHit>();
+  for (const hits of perPage) {
+    for (const h of hits) {
+      const cur = out.get(h.level);
+      if (!cur) { out.set(h.level, { ...h }); continue; }
+      const better = h.score > cur.score ? h : cur;
+      out.set(h.level, { ...better, score: Math.min(cur.score + h.score, 20) });
+    }
+  }
+  return [...out.values()]
+    .map((h) => ({ ...h, strong: h.score >= STRONG }))
+    .filter((h) => h.score >= SUGGEST)
+    .sort((a, b) => LEVEL_ORDER.indexOf(a.level) - LEVEL_ORDER.indexOf(b.level));
+}
+
 // ---- admissions ----
 type Admission = { status: "open" | "closed"; year: string | null; evidence: string; url: string; stale: boolean };
 
@@ -465,12 +572,12 @@ async function robotsFor(deps: Deps, site: URL): Promise<string> {
 }
 
 type School = { id: string; name: string; website: string | null; address?: string | null };
-type Reading = { pages: { url: string; status: number; note?: string }[]; boards: BoardHit[]; admission: Admission | null; error: string | null };
+type Reading = { pages: { url: string; status: number; note?: string }[]; boards: BoardHit[]; levels: LevelHit[]; admission: Admission | null; error: string | null };
 
 async function readSchool(deps: Deps, school: School, deadline: number): Promise<Reading> {
   const pages: Reading["pages"] = [];
   const home = safeUrl(school.website);
-  if (!home) return { pages, boards: [], admission: null, error: "website address is missing or not allowed" };
+  if (!home) return { pages, boards: [], levels: [], admission: null, error: "website address is missing or not allowed" };
   const robots = await robotsFor(deps, home);
   const texts: { url: string; text: string }[] = [];
   const read = async (u: URL) => {
@@ -490,9 +597,10 @@ async function readSchool(deps: Deps, school: School, deadline: number): Promise
       if (u) await read(u);
     }
   }
-  if (!texts.length) return { pages, boards: [], admission: null, error: pages[pages.length - 1]?.note ?? "could not read the website" };
+  if (!texts.length) return { pages, boards: [], levels: [], admission: null, error: pages[pages.length - 1]?.note ?? "could not read the website" };
 
   const boards = mergeBoards(texts.map((t) => findBoards(t.text, t.url)));
+  const levels = mergeLevels(texts.map((t) => findLevels(t.text, t.url)));
   let admission: Admission | null = null;
   for (const t of texts) {
     const a = findAdmission(t.text, t.url, deps.now());
@@ -513,7 +621,7 @@ async function readSchool(deps: Deps, school: School, deadline: number): Promise
       cbse.verified = { source: "cbse", confirmed: false, reasons: [rec ? "CBSE record is for a different number" : "no CBSE record found for this number"], record: p.url };
     }
   }
-  return { pages, boards, admission, error: null };
+  return { pages, boards, levels, admission, error: null };
 }
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
@@ -558,7 +666,7 @@ function createHandler(deps: Deps) {
         schools = data ?? [];
       } else {
         const { data, error } = await db.from("schools").select("id,name,website,address")
-          .eq("is_hidden", false).not("website", "is", null).or(`last_site_check_at.is.null,last_site_check_at.lt.${since}`)
+          .eq("is_hidden", false).eq("category", "school").not("website", "is", null).or(`last_site_check_at.is.null,last_site_check_at.lt.${since}`)
           .order("last_site_check_at", { ascending: true, nullsFirst: true }).order("name_sort", { ascending: true }).limit(limit);
         if (error) {
           const missing = /last_site_check_at|does not exist|schema cache/i.test(error.message ?? "");
@@ -574,24 +682,24 @@ function createHandler(deps: Deps) {
         const r = await readSchool(deps, school, deadline);
         if (!dryRun) {
           const { error } = await db.rpc("record_site_finding", {
-            p_school: school.id, p_website: school.website ?? "", p_pages: r.pages, p_boards: r.boards, p_admission: r.admission, p_error: r.error,
+            p_school: school.id, p_website: school.website ?? "", p_pages: r.pages, p_boards: r.boards, p_admission: r.admission, p_error: r.error, p_levels: r.levels,
           });
-          if (error) return { school: school.name, website: school.website, boards: [], admission: null, error: `could not save: ${error.message}` };
+          if (error) return { school: school.name, website: school.website, boards: [], levels: [], admission: null, error: `could not save: ${error.message}` };
         }
-        return { school: school.name, website: school.website, boards: r.boards.map((b) => `${b.board}${b.strong ? "" : "?"}${b.verified?.confirmed ? " (CBSE record)" : ""}`), admission: r.admission ? `${r.admission.status}${r.admission.year ? " " + r.admission.year : ""}${r.admission.stale ? " (old)" : ""}` : null, error: r.error };
+        return { school: school.name, website: school.website, boards: r.boards.map((b) => `${b.board}${b.strong ? "" : "?"}${b.verified?.confirmed ? " (CBSE record)" : ""}`), levels: r.levels.map((l) => `${l.level}${l.strong ? "" : "?"}`), admission: r.admission ? `${r.admission.status}${r.admission.year ? " " + r.admission.year : ""}${r.admission.stale ? " (old)" : ""}` : null, error: r.error };
       });
       const done = results.filter(Boolean) as any[];
 
       let remaining: number | null = null;
       if (!ids) {
         const { count } = await db.from("schools").select("id", { count: "exact", head: true })
-          .eq("is_hidden", false).not("website", "is", null).or(`last_site_check_at.is.null,last_site_check_at.lt.${since}`);
+          .eq("is_hidden", false).eq("category", "school").not("website", "is", null).or(`last_site_check_at.is.null,last_site_check_at.lt.${since}`);
         remaining = typeof count === "number" ? count : null;
       }
       return json({
         ok: true, dryRun,
         processed: done.length,
-        withFindings: done.filter((d) => d.boards.length || d.admission).length,
+        withFindings: done.filter((d) => d.boards.length || d.levels.length || d.admission).length,
         errors: done.filter((d) => d.error).length,
         remaining, stoppedEarly,
         results: done,
