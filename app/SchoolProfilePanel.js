@@ -30,6 +30,7 @@ export default function SchoolProfilePanel({ mode = 'admin', userId = null }) {
   const [details, setDetails] = useState({});
   const [ach, setAch] = useState(EMPTY_ACH);
   const [file, setFile] = useState(null);
+  const [fileKey, setFileKey] = useState(0); // a new key empties the file picker after an upload
   const [credit, setCredit] = useState('');
   const [allowed, setAllowed] = useState(false);
   const [wikiTerm, setWikiTerm] = useState('');
@@ -169,14 +170,14 @@ export default function SchoolProfilePanel({ mode = 'admin', userId = null }) {
             ) : <p data-testid="profile-no-photo" className="text-sm text-gray-600 mb-2">No photo yet. Parents see a drawing of a school instead.</p>}
             <div className="border border-gray-200 rounded p-3 mb-2 bg-gray-50">
               <p className="text-sm font-bold mb-1">Upload a photo of the school</p>
-              <input data-testid="photo-file" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="text-sm" />
+              <input key={fileKey} data-testid="photo-file" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="text-sm" />
               <input data-testid="photo-credit" value={credit} onChange={(e) => setCredit(e.target.value)} placeholder="Credit, e.g. the photographer (optional)"
                 className="block w-full border border-gray-300 rounded px-2 py-1 text-sm text-black mt-2" />
               <label className="flex items-start gap-2 text-xs text-gray-700 mt-2">
                 <input data-testid="photo-permission" type="checkbox" checked={allowed} onChange={(e) => setAllowed(e.target.checked)} />
                 The school owns this photo, or has permission to publish it on Kidscover.
               </label>
-              <button data-testid="photo-upload" disabled={busy || !file || !allowed} onClick={() => act(() => uploadPhoto(supabase, school.id, file, credit), 'Photo uploaded. Parents see it now.').then((ok) => { if (ok) { setFile(null); setAllowed(false); } })}
+              <button data-testid="photo-upload" disabled={busy || !file || !allowed} onClick={() => act(() => uploadPhoto(supabase, school.id, file, credit), 'Photo uploaded. Parents see it now.').then((ok) => { if (ok) { setFile(null); setAllowed(false); setFileKey((k) => k + 1); } })}
                 className={`${btn} bg-blue-600 text-white mt-2`}>Upload and use</button>
             </div>
             <div className="border border-gray-200 rounded p-3 bg-gray-50">
