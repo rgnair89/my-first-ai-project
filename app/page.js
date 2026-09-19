@@ -5,6 +5,7 @@ import { supabase } from '@/utils/supabase';
 import SweepPanel from './SweepPanel';
 import ReviewsPanel from './ReviewsPanel';
 import EnquiriesPanel from './EnquiriesPanel';
+import DriveTimesPanel from './DriveTimesPanel';
 import { loadPendingCount } from './reviews-admin';
 import { loadOpenCount } from './enquiries-admin';
 
@@ -224,6 +225,7 @@ function AdminWebDashboard({ profile }) {
       </div>
 
       <SweepPanel />
+      <DriveTimesPanel />
 
       <div className="flex gap-4 mb-6">
         <button
