@@ -87,7 +87,7 @@ export default function EnquiriesPanel({ onChanged }) {
   const late = overdue(threads);
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6" data-testid="enquiries-panel">
+    <div className="bg-white text-gray-900 border border-gray-200 rounded-xl shadow-sm p-6" data-testid="enquiries-panel">
       <h2 className="text-lg font-bold text-gray-900 mb-1">Admissions enquiries</h2>
       <p className="text-sm text-gray-600 mb-4">
         Questions parents sent from the app. Replying here shows up in the parent&apos;s app straight away. Enquiries do not
