@@ -4,7 +4,9 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/utils/supabase';
 import SweepPanel from './SweepPanel';
 import ReviewsPanel from './ReviewsPanel';
+import EnquiriesPanel from './EnquiriesPanel';
 import { loadPendingCount } from './reviews-admin';
+import { loadOpenCount } from './enquiries-admin';
 
 export default function RootRouting() {
   const [session, setSession] = useState(null);
@@ -185,15 +187,14 @@ function ParentWebDashboard({ profile }) {
 }
 
 function AdminWebDashboard({ profile }) {
-  const [activeSubTab, setActiveSubTab] = useState('applications'); // 'applications' | 'tickets'
+  const [activeSubTab, setActiveSubTab] = useState('applications'); // 'applications' | 'enquiries' | 'reviews'
   const [applications, setApplications] = useState([]);
-  const [tickets, setTickets] = useState([]);
-  const [replyText, setReplyText] = useState({});
+  const [openEnquiries, setOpenEnquiries] = useState(0);
   const [pendingReviews, setPendingReviews] = useState(0);
 
   useEffect(() => {
     fetchApplications();
-    fetchTickets();
+    fetchOpenEnquiries();
     fetchPendingReviews();
   }, []);
 
@@ -201,29 +202,13 @@ function AdminWebDashboard({ profile }) {
     setPendingReviews(await loadPendingCount(supabase));
   }
 
+  async function fetchOpenEnquiries() {
+    setOpenEnquiries(await loadOpenCount(supabase));
+  }
+
   async function fetchApplications() {
     const { data } = await supabase.from('applications').select('*, schools(name)').order('created_at', { ascending: false });
     setApplications(data || []);
-  }
-
-  async function fetchTickets() {
-    const { data } = await supabase.from('tickets').select('*, schools(name), profiles(first_name, last_name, email)').order('created_at', { ascending: false });
-    setTickets(data || []);
-  }
-
-  async function handleReply(ticketId) {
-    const reply = replyText[ticketId];
-    if (!reply) return;
-
-    const { error } = await supabase
-      .from('tickets')
-      .update({ admin_reply: reply, status: 'answered' })
-      .eq('id', ticketId);
-
-    if (!error) {
-      fetchTickets();
-      setReplyText({ ...replyText, [ticketId]: '' });
-    }
   }
 
   return (
@@ -247,11 +232,11 @@ function AdminWebDashboard({ profile }) {
         >
           Admissions Pipeline ({applications.length})
         </button>
-        <button 
-          onClick={() => setActiveSubTab('tickets')}
-          className={`px-4 py-2 rounded-lg font-bold text-sm ${activeSubTab === 'tickets' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
+        <button
+          onClick={() => setActiveSubTab('enquiries')}
+          className={`px-4 py-2 rounded-lg font-bold text-sm ${activeSubTab === 'enquiries' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
         >
-          Support Tickets ({tickets.filter(t => t.status === 'open').length} Open)
+          Admissions Enquiries ({openEnquiries} need a reply)
         </button>
         <button
           onClick={() => setActiveSubTab('reviews')}
@@ -284,51 +269,7 @@ function AdminWebDashboard({ profile }) {
           )}
         </div>
       ) : (
-        <div className="space-y-4">
-          {tickets.length === 0 ? (
-            <p className="text-gray-500 italic text-sm">No support tickets found.</p>
-          ) : (
-            tickets.map((ticket) => (
-              <div key={ticket.id} className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-                <div className="flex justify-between items-start mb-3">
-                  <div>
-                    <span className={`px-2 py-1 text-xs font-bold uppercase rounded-md ${ticket.status === 'open' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
-                      {ticket.status}
-                    </span>
-                    <h3 className="text-lg font-bold text-gray-900 mt-2">{ticket.subject}</h3>
-                    <p className="text-xs text-gray-500">School: {ticket.schools?.name} | Parent: {ticket.profiles?.first_name} {ticket.profiles?.last_name} ({ticket.profiles?.email})</p>
-                  </div>
-                  <span className="text-xs text-gray-400">{new Date(ticket.created_at).toLocaleDateString()}</span>
-                </div>
-                
-                <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg mb-4">{ticket.message}</p>
-
-                {ticket.admin_reply ? (
-                  <div className="bg-blue-50 border border-blue-100 p-3 rounded-lg">
-                    <p className="text-xs font-bold text-blue-800">School Response:</p>
-                    <p className="text-sm text-blue-900 mt-1">{ticket.admin_reply}</p>
-                  </div>
-                ) : (
-                  <div className="flex gap-2">
-                    <input 
-                      type="text" 
-                      placeholder="Type a response..."
-                      value={replyText[ticket.id] || ''}
-                      onChange={(e) => setReplyText({ ...replyText, [ticket.id]: e.target.value })}
-                      className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm text-black"
-                    />
-                    <button 
-                      onClick={() => handleReply(ticket.id)}
-                      className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700"
-                    >
-                      Send Reply
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))
-          )}
-        </div>
+        <EnquiriesPanel onChanged={fetchOpenEnquiries} />
       )}
     </div>
   );
