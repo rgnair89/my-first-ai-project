@@ -6,6 +6,7 @@ import SweepPanel from './SweepPanel';
 import ReviewsPanel from './ReviewsPanel';
 import EnquiriesPanel from './EnquiriesPanel';
 import DriveTimesPanel from './DriveTimesPanel';
+import SiteDataPanel from './SiteDataPanel';
 import { loadPendingCount } from './reviews-admin';
 import { loadOpenCount } from './enquiries-admin';
 
@@ -188,7 +189,7 @@ function ParentWebDashboard({ profile }) {
 }
 
 function AdminWebDashboard({ profile }) {
-  const [activeSubTab, setActiveSubTab] = useState('applications'); // 'applications' | 'enquiries' | 'reviews'
+  const [activeSubTab, setActiveSubTab] = useState('applications'); // 'applications' | 'enquiries' | 'reviews' | 'schooldata'
   const [applications, setApplications] = useState([]);
   const [openEnquiries, setOpenEnquiries] = useState(0);
   const [pendingReviews, setPendingReviews] = useState(0);
@@ -246,9 +247,17 @@ function AdminWebDashboard({ profile }) {
         >
           Parent Reviews ({pendingReviews} waiting)
         </button>
+        <button
+          onClick={() => setActiveSubTab('schooldata')}
+          className={`px-4 py-2 rounded-lg font-bold text-sm ${activeSubTab === 'schooldata' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
+        >
+          School Data
+        </button>
       </div>
 
-      {activeSubTab === 'reviews' ? (
+      {activeSubTab === 'schooldata' ? (
+        <SiteDataPanel />
+      ) : activeSubTab === 'reviews' ? (
         <ReviewsPanel onChanged={fetchPendingReviews} />
       ) : activeSubTab === 'applications' ? (
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden p-6">
