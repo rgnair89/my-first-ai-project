@@ -1,21 +1,22 @@
 // supabase/functions/read-school-websites/index.ts
 //
-// Reads schools' own websites for three facts: which board they follow, which levels they run (preschool, primary,
-// secondary, daycare), and whether admissions are open. For CBSE, an
+// Reads schools' own websites for: which board they follow, which levels they run (preschool, primary, secondary,
+// daycare), their facilities (library, labs, pool, school bus, teacher-student ratio ...), the achievements they claim
+// (class 10 / 12 results, placements, alumni, awards) and whether admissions are open. For CBSE, an
 // affiliation number the school gives is checked against CBSE's public record for that number. Everything found goes
 // into school_site_findings for an admin to accept or reject in the Partner Portal: nothing reaches parents unchecked.
 // Self-contained: paste this whole file into the dashboard editor as a new function called "read-school-websites".
 //
 // Before it can work: run supabase/migrations/20260919000800_school_website_findings.sql and, for levels,
-// 20260919001100_levels_from_websites.sql. Only places in the "school" category are read (20260919001000). No secrets are needed: the
+// 20260919001100_levels_from_websites.sql and 20260919001300_facilities_achievements_from_websites.sql. Only places in the "school" category are read (20260919001000). No secrets are needed: the
 // function acts AS THE ADMIN who pressed the button (their sign-in), so only admins can run it.
 //
 // Request (POST): { "limit": 6, "dryRun": false }            -> the next schools whose website was not read recently
 //                 { "schoolIds": ["uuid", ...] }             -> exactly these (max 10)
-// Answer: { ok, processed, withFindings, errors, remaining, stoppedEarly, results: [{ school, website, boards, levels, admission, error }] }
+// Answer: { ok, processed, withFindings, errors, remaining, stoppedEarly, results: [{ school, website, boards, levels, facilities, achievements, admission, error }] }
 //
-// Manners: identifies itself as KidscoverBot, obeys robots.txt, reads at most 3 pages per school (the home page and
-// the two most likely to state the board or admissions), 1.5 MB and 10 seconds per page, 3 schools at a time.
+// Manners: identifies itself as KidscoverBot, obeys robots.txt, reads at most 4 pages per school (the home page and
+// the three most likely to state the board, admissions or facilities), 1.5 MB and 10 seconds per page, 3 schools at a time.
 // Safety: website addresses come from outside data, so private and internal addresses are refused, and every redirect
 // is checked again. PDFs are not read.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -27,7 +28,7 @@ const USER_AGENT = "KidscoverBot/1.0 (school directory; reads public pages for b
 const MAX_BYTES = 1_500_000;
 const PAGE_TIMEOUT_MS = 10000;
 const ROBOTS_TIMEOUT_MS = 5000;
-const MAX_EXTRA_PAGES = 2;
+const MAX_EXTRA_PAGES = 3;
 const MAX_REDIRECTS = 5;
 const MAX_SCHOOLS_PER_CALL = 10;
 const DEFAULT_LIMIT = 6;
@@ -154,9 +155,13 @@ function htmlToText(html: string): string {
 // several schools (a trust's site), this school's pages go before the others: every distinctive word of its name is
 // in the link. Its own page ("ab-goregaokar-english-school.php") beats another school's admissions page, and its own
 // admissions page beats both. A page with the name but no school word (the trust's sports club) gets nothing extra.
+// Once a site shows it serves several schools (this school's own page, and pages of two or more other schools), the
+// other schools' pages are not read at all: their levels, board or admissions would be taken for this school's.
 function pickExtraPages(html: string, base: URL, schoolName = ""): string[] {
   const own = [...nameTokens(schoolName)];
   const scored = new Map<string, number>();
+  const otherSchool = new Set<string>();
+  let trustSite = false;
   for (const m of html.matchAll(/<a\b[^>]*href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>([\s\S]*?)<\/a>/gi)) {
     const href = decodeEntities(m[1] ?? m[2] ?? m[3] ?? "");
     const label = htmlToText(m[4] ?? "").toLowerCase();
@@ -171,15 +176,22 @@ function pickExtraPages(html: string, base: URL, schoolName = ""): string[] {
     if (/mandatory|disclosure/.test(hay)) score = Math.max(score, 5);
     if (/affiliat/.test(hay)) score = Math.max(score, 4);
     if (/admission|enrol|registration/.test(hay)) score = Math.max(score, 3);
-    if (/about|overview|who-we-are|our-school|curriculum|academics/.test(hay)) score = Math.max(score, 1);
+    if (/facilit|infrastructure|campus|amenit|achievement|results|alumni|awards/.test(hay)) score = Math.max(score, 2);
+    if (/about|overview|who-we-are|our-school|curriculum|academics|section|wing|kindergarten|primary|secondary|junior-college/.test(hay)) score = Math.max(score, 1);
     const words = " " + hay.replace(/[^a-z0-9]+/g, " ") + " ";
+    const schoolish = /school|vidyalay|mandir|convent|balvihar/.test(hay);
     if (own.length && own.every((w) => words.includes(" " + w + " "))) {
       if (score > 0) score += 1;
       else if (/school|vidyalay|mandir|convent/.test(hay)) score = 3.5;
+      if (schoolish) trustSite = true;
+    } else if (own.length && schoolish) {
+      otherSchool.add(key);
     }
     if (score > 0 && score > (scored.get(key) ?? 0)) scored.set(key, score);
   }
-  return [...scored].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length).slice(0, MAX_EXTRA_PAGES).map(([k]) => k);
+  const shared = trustSite && otherSchool.size >= 2; // this school has its own pages, and at least two other schools do
+  return [...scored].filter(([k]) => !(shared && otherSchool.has(k)))
+    .sort((a, b) => b[1] - a[1] || a[0].length - b[0].length).slice(0, MAX_EXTRA_PAGES).map(([k]) => k);
 }
 
 // ---- boards ----
@@ -412,6 +424,121 @@ function mergeLevels(perPage: LevelHit[][]): LevelHit[] {
     .sort((a, b) => LEVEL_ORDER.indexOf(a.level) - LEVEL_ORDER.indexOf(b.level));
 }
 
+// ---- facilities ----
+// The facilities on the app's list (the same keys as public.facility_keys()). A mention is 2 points, 4 in a sentence
+// that is about the school's facilities ("our campus has", "well-equipped", "infrastructure"); a facility counts at
+// most three times. 4 or more is a strong suggestion. A teacher-student ratio is taken only as a ratio ("1:20").
+type FacilityHit = { facility: string; detail: string | null; score: number; strong: boolean; evidence: string; url: string };
+const FACILITY_ORDER = ["cafeteria", "outdoor_playground", "indoor_play", "swimming_pool", "sports_courts", "library", "science_labs",
+  "computer_lab", "maths_lab", "stem_lab", "ai_lab", "smart_classes", "auditorium", "art_music", "transport", "medical_room", "cctv",
+  "air_conditioned", "special_needs", "teacher_ratio"];
+const FACILITY_RULES: [string, RegExp][] = [
+  ["cafeteria", /\b(?:cafeteria|canteen|dining hall)\b/i],
+  ["outdoor_playground", /\b(?:play ?grounds?|sports grounds?|open grounds?|play ?fields?)\b/i],
+  ["indoor_play", /\b(?:indoor (?:games|sports|play(?: area)?)|sports hall|multi-?purpose hall|gymnasium)\b/i],
+  ["swimming_pool", /\bswimming pools?\b/i],
+  ["sports_courts", /\b(?:basketball|volleyball|tennis|badminton|squash|throwball) courts?\b|\bskating rink\b|\b(?:football|cricket) (?:field|ground|turf|pitch|nets)\b/i],
+  ["library", /\blibrar(?:y|ies)\b/i],
+  ["science_labs", /\b(?:science|physics|chemistry|biology) lab(?:s|oratory|oratories)?\b/i],
+  ["computer_lab", /\b(?:computer|ict|it) lab(?:s|oratory|oratories)?\b/i],
+  ["maths_lab", /\b(?:maths?|mathematics) lab(?:s|oratory)?\b/i],
+  ["stem_lab", /\b(?:stem|steam|robotics|tinkering) lab(?:s|oratory)?\b|\batal tinkering\b/i],
+  ["ai_lab", /\b(?:ai|artificial intelligence|coding) lab(?:s|oratory)?\b/i],
+  ["smart_classes", /\bsmart ?(?:class(?:room)?s?|boards?)\b|\binteractive (?:flat )?(?:panels|boards)\b|\bdigital classrooms?\b/i],
+  ["auditorium", /\b(?:auditorium|amphitheatre|amphitheater)\b/i],
+  ["art_music", /\b(?:art|music|dance) (?:room|studio)s?\b/i],
+  ["transport", /\bschool bus(?:es)?\b|\btransport(?:ation)? (?:facilit(?:y|ies)|service)\b|\bbus service\b/i],
+  ["medical_room", /\b(?:infirmary|sick bay|medical room|school nurse|resident nurse|doctor on call|first[- ]aid room)\b/i],
+  ["cctv", /\bcctv\b/i],
+  ["air_conditioned", /\bair[- ]?conditioned\b|\bfully a\.?c\.?\b/i],
+  ["special_needs", /\b(?:special needs|inclusive education|learning support|special educators?|resource room)\b/i],
+];
+const FACILITY_CONTEXT = /\b(?:facilit(?:y|ies)|infrastructure|campus|equipped|state[- ]of[- ]the[- ]art|spacious|well[- ]stocked|we (?:have|offer|provide)|(?:has|have) (?:a|an|its own)|boasts?|houses)\b/i;
+const RATIO_RE = /\b(?:teacher|faculty|staff)s?[- ]?(?:to[- ])?(?:student|pupil)s?[- ]ratio\D{0,25}?(1\s*:\s*\d{1,3})\b|\b(?:student|pupil)s?[- ]?(?:to[- ])?(?:teacher|faculty)s?[- ]ratio\D{0,25}?(\d{1,3}\s*:\s*1)\b/i;
+
+function findFacilities(text: string, url: string): FacilityHit[] {
+  const acc = new Map<string, FacilityHit & { best: number; mentions: number }>();
+  for (const sent of sentences(text)) {
+    const points = FACILITY_CONTEXT.test(sent) ? 4 : 2;
+    for (const [facility, re] of FACILITY_RULES) {
+      if (!re.test(sent)) continue;
+      const cur = acc.get(facility) ?? { facility, detail: null, score: 0, strong: false, evidence: "", url, best: 0, mentions: 0 };
+      if (cur.mentions >= 3) continue;
+      cur.mentions += 1;
+      cur.score += points;
+      if (points > cur.best) { cur.best = points; cur.evidence = clip(sent); }
+      acc.set(facility, cur);
+    }
+    const r = RATIO_RE.exec(sent);
+    const n = r ? Number((r[1] ? r[1].split(":")[1] : r[2].split(":")[0]).trim()) : NaN;
+    if (!acc.has("teacher_ratio") && n >= 2 && n <= 80) {
+      acc.set("teacher_ratio", { facility: "teacher_ratio", detail: `1:${n}`, score: 6, strong: true, evidence: clip(sent), url, best: 6, mentions: 1 });
+    }
+  }
+  return [...acc.values()].map(({ best, mentions, ...h }) => h); // strong is decided once all pages are in
+}
+
+function mergeFacilities(perPage: FacilityHit[][]): FacilityHit[] {
+  const out = new Map<string, FacilityHit>();
+  for (const hits of perPage) {
+    for (const h of hits) {
+      const cur = out.get(h.facility);
+      if (!cur) { out.set(h.facility, { ...h }); continue; }
+      const better = h.score > cur.score ? h : cur;
+      out.set(h.facility, { ...better, score: Math.min(cur.score + h.score, 12) });
+    }
+  }
+  return [...out.values()]
+    .map((h) => ({ ...h, strong: h.score >= 4 }))
+    .sort((a, b) => FACILITY_ORDER.indexOf(a.facility) - FACILITY_ORDER.indexOf(b.facility));
+}
+
+// ---- achievements the school claims ----
+// Board results need the exam (SSC / ICSE / class 10, HSC / ISC / class 12) AND a result word AND a percentage in the
+// same sentence. Placements need admission or placement words near universities or colleges; alumni and awards their
+// own phrases. The sentence itself is kept as the achievement, for an admin to check against the page.
+type AchievementHit = { kind: string; text: string; year: number | null; evidence: string; url: string };
+const ACHIEVEMENT_ORDER = ["class10", "class12", "placements", "alumni", "award"];
+const RESULT_WORDS = /\b(?:results?|pass(?:ed)?|passing|toppers?|scored|scores?|distinctions?|first class|centum)\b/i;
+const PERCENT = /\b\d{2,3}(?:\.\d{1,2})?\s*%/;
+const CLASS10_RE = /\b(?:S\.?S\.?C\.?|I\.?C\.?S\.?E\.?|IGCSE|class\s*(?:x|10)(?:th)?|std\.?\s*(?:x|10)(?:th)?|grade\s*10|10th)\b/i;
+const CLASS12_RE = /\b(?:H\.?S\.?C\.?|I\.?S\.?C\.?|AISSCE|class\s*(?:xii|12)(?:th)?|std\.?\s*(?:xii|12)(?:th)?|grade\s*12|12th|IB diploma|A[- ]levels?)\b/i;
+const PLACEMENT_RE = /\b(?:admitted|admissions?|placed|placements?|offers?|secured|got into|accepted)\b.{0,80}\b(?:universit(?:y|ies)|IITs?|NITs?|BITS|AIIMS|Ivy League|Oxford|Cambridge|Stanford|Harvard|MIT|colleges? (?:in|abroad|across)|abroad)\b/i;
+const ALUMNI_RE = /\b(?:notable|distinguished|eminent|illustrious|famous|proud) alumni\b|\balumni (?:include|includes|such as|like)\b|\bour alumni\b.{0,60}\b(?:include|such as|are)\b/i;
+const AWARD_RE = /\b(?:awarded|won|received|conferred|ranked|recogni[sz]ed|felicitated|honou?red)\b.{0,80}\b(?:awards?|ranking|rank|prize|trophy|best school|no\.?\s?1|number one|top \d+|accreditation)\b/i;
+
+function findAchievements(text: string, url: string, now: Date): AchievementHit[] {
+  const out: AchievementHit[] = [];
+  const latest = now.getUTCFullYear() + 1;
+  for (const sent of sentences(text)) {
+    if (sent.length < 12) continue;
+    const results = RESULT_WORDS.test(sent) && PERCENT.test(sent);
+    let kind: string | null = null;
+    if (results && CLASS12_RE.test(sent)) kind = "class12";
+    else if (results && CLASS10_RE.test(sent)) kind = "class10";
+    else if (ALUMNI_RE.test(sent)) kind = "alumni";
+    else if (PLACEMENT_RE.test(sent) && !/\badmissions?\s+(?:are\s+|is\s+)?(?:now\s+)?(?:open|closed)\b/i.test(sent)) kind = "placements";
+    else if (AWARD_RE.test(sent)) kind = "award";
+    if (!kind) continue;
+    const years = [...sent.matchAll(/\b(19[5-9]\d|20\d{2})\b/g)].map((m) => Number(m[1])).filter((y) => y <= latest);
+    const t = clip(sent, 300);
+    if (out.some((a) => a.text.toLowerCase() === t.toLowerCase())) continue;
+    out.push({ kind, text: t, year: years.length ? Math.max(...years) : null, evidence: t, url });
+  }
+  return out;
+}
+
+// At most three of a kind and twelve in all, board results first, newest first within a kind.
+function mergeAchievements(perPage: AchievementHit[][]): AchievementHit[] {
+  const seen = new Set<string>();
+  const all = perPage.flat().filter((a) => { const k = a.text.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
+  const out: AchievementHit[] = [];
+  for (const kind of ACHIEVEMENT_ORDER) {
+    out.push(...all.filter((a) => a.kind === kind).sort((a, b) => (b.year ?? 0) - (a.year ?? 0)).slice(0, 3));
+  }
+  return out.slice(0, 12);
+}
+
 // ---- admissions ----
 type Admission = { status: "open" | "closed"; year: string | null; evidence: string; url: string; stale: boolean };
 
@@ -572,12 +699,12 @@ async function robotsFor(deps: Deps, site: URL): Promise<string> {
 }
 
 type School = { id: string; name: string; website: string | null; address?: string | null };
-type Reading = { pages: { url: string; status: number; note?: string }[]; boards: BoardHit[]; levels: LevelHit[]; admission: Admission | null; error: string | null };
+type Reading = { pages: { url: string; status: number; note?: string }[]; boards: BoardHit[]; levels: LevelHit[]; facilities: FacilityHit[]; achievements: AchievementHit[]; admission: Admission | null; error: string | null };
 
 async function readSchool(deps: Deps, school: School, deadline: number): Promise<Reading> {
   const pages: Reading["pages"] = [];
   const home = safeUrl(school.website);
-  if (!home) return { pages, boards: [], levels: [], admission: null, error: "website address is missing or not allowed" };
+  if (!home) return { pages, boards: [], levels: [], facilities: [], achievements: [], admission: null, error: "website address is missing or not allowed" };
   const robots = await robotsFor(deps, home);
   const texts: { url: string; text: string }[] = [];
   const read = async (u: URL) => {
@@ -597,10 +724,12 @@ async function readSchool(deps: Deps, school: School, deadline: number): Promise
       if (u) await read(u);
     }
   }
-  if (!texts.length) return { pages, boards: [], levels: [], admission: null, error: pages[pages.length - 1]?.note ?? "could not read the website" };
+  if (!texts.length) return { pages, boards: [], levels: [], facilities: [], achievements: [], admission: null, error: pages[pages.length - 1]?.note ?? "could not read the website" };
 
   const boards = mergeBoards(texts.map((t) => findBoards(t.text, t.url)));
   const levels = mergeLevels(texts.map((t) => findLevels(t.text, t.url)));
+  const facilities = mergeFacilities(texts.map((t) => findFacilities(t.text, t.url)));
+  const achievements = mergeAchievements(texts.map((t) => findAchievements(t.text, t.url, deps.now())));
   let admission: Admission | null = null;
   for (const t of texts) {
     const a = findAdmission(t.text, t.url, deps.now());
@@ -621,7 +750,7 @@ async function readSchool(deps: Deps, school: School, deadline: number): Promise
       cbse.verified = { source: "cbse", confirmed: false, reasons: [rec ? "CBSE record is for a different number" : "no CBSE record found for this number"], record: p.url };
     }
   }
-  return { pages, boards, levels, admission, error: null };
+  return { pages, boards, levels, facilities, achievements, admission, error: null };
 }
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
@@ -682,11 +811,11 @@ function createHandler(deps: Deps) {
         const r = await readSchool(deps, school, deadline);
         if (!dryRun) {
           const { error } = await db.rpc("record_site_finding", {
-            p_school: school.id, p_website: school.website ?? "", p_pages: r.pages, p_boards: r.boards, p_admission: r.admission, p_error: r.error, p_levels: r.levels,
+            p_school: school.id, p_website: school.website ?? "", p_pages: r.pages, p_boards: r.boards, p_admission: r.admission, p_error: r.error, p_levels: r.levels, p_facilities: r.facilities, p_achievements: r.achievements,
           });
-          if (error) return { school: school.name, website: school.website, boards: [], levels: [], admission: null, error: `could not save: ${error.message}` };
+          if (error) return { school: school.name, website: school.website, boards: [], levels: [], facilities: [], achievements: [], admission: null, error: `could not save: ${error.message}` };
         }
-        return { school: school.name, website: school.website, boards: r.boards.map((b) => `${b.board}${b.strong ? "" : "?"}${b.verified?.confirmed ? " (CBSE record)" : ""}`), levels: r.levels.map((l) => `${l.level}${l.strong ? "" : "?"}`), admission: r.admission ? `${r.admission.status}${r.admission.year ? " " + r.admission.year : ""}${r.admission.stale ? " (old)" : ""}` : null, error: r.error };
+        return { school: school.name, website: school.website, boards: r.boards.map((b) => `${b.board}${b.strong ? "" : "?"}${b.verified?.confirmed ? " (CBSE record)" : ""}`), levels: r.levels.map((l) => `${l.level}${l.strong ? "" : "?"}`), facilities: r.facilities.map((x) => `${x.facility}${x.detail ? " " + x.detail : ""}${x.strong ? "" : "?"}`), achievements: r.achievements.map((a) => a.kind), admission: r.admission ? `${r.admission.status}${r.admission.year ? " " + r.admission.year : ""}${r.admission.stale ? " (old)" : ""}` : null, error: r.error };
       });
       const done = results.filter(Boolean) as any[];
 
@@ -699,7 +828,7 @@ function createHandler(deps: Deps) {
       return json({
         ok: true, dryRun,
         processed: done.length,
-        withFindings: done.filter((d) => d.boards.length || d.levels.length || d.admission).length,
+        withFindings: done.filter((d) => d.boards.length || d.levels.length || d.facilities.length || d.achievements.length || d.admission).length,
         errors: done.filter((d) => d.error).length,
         remaining, stoppedEarly,
         results: done,

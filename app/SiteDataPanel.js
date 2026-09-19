@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/utils/supabase';
 import {
   VIEWS, BATCH, SESSION_CAP, loadFindings, loadCounts, review, readBatch, defaultChoice, boardLabel, admissionLabel,
-  confirmedCbse, progressLine, friendlyError, isConfirmed, levelLabel, levelsText,
+  confirmedCbse, progressLine, friendlyError, isConfirmed, levelLabel, levelsText, facilityHitLabel, achievementHitLabel,
 } from './site-data-admin';
 
 const when = (iso) => {
@@ -62,7 +62,7 @@ export default function SiteDataPanel() {
     let done = 0;
     for (const f of list) {
       setBusyId(f.id);
-      const res = await review(supabase, f, { boards: ['CBSE'], levels: [], admission: false }, 'Accepted in bulk: confirmed by the CBSE record');
+      const res = await review(supabase, f, { boards: ['CBSE'], levels: [], facilities: [], achievements: [], admission: false }, 'Accepted in bulk: confirmed by the CBSE record');
       if (res?.error) { setError(`${f.school}: ${friendlyError(res.error)}`); break; }
       done++;
     }
@@ -111,8 +111,8 @@ export default function SiteDataPanel() {
     <div className="bg-white text-gray-900 border border-gray-200 rounded-xl shadow-sm p-6" data-testid="site-panel">
       <h2 className="text-lg font-bold text-gray-900 mb-1">School data from school websites</h2>
       <p className="text-sm text-gray-600 mb-4">
-        Reads each school&apos;s own website for its board, its levels (preschool, primary, secondary, daycare) and whether
-        admissions are open, and checks CBSE affiliation numbers against CBSE&apos;s public record. Nothing reaches parents
+        Reads each school&apos;s own website for its board, its levels (preschool, primary, secondary, daycare), its facilities,
+        the achievements it claims and whether admissions are open, and checks CBSE affiliation numbers against CBSE&apos;s public record. Nothing reaches parents
         until you accept it here.
       </p>
 
@@ -132,7 +132,7 @@ export default function SiteDataPanel() {
         <div data-testid="site-preview" className="text-sm bg-gray-50 border border-gray-200 rounded p-3 mb-3">
           <p className="font-bold">Preview (nothing saved):</p>
           <ul className="list-disc ml-5">
-            {preview.map((p) => <li key={p.school}>{p.school}: {p.boards.length ? p.boards.join(', ') : 'no board found'}; {p.levels?.length ? `levels ${p.levels.join(', ')}` : 'no levels found'}{p.admission ? `; admissions ${p.admission}` : ''}{p.error ? ` (${p.error})` : ''}</li>)}
+            {preview.map((p) => <li key={p.school}>{p.school}: {p.boards.length ? p.boards.join(', ') : 'no board found'}; {p.levels?.length ? `levels ${p.levels.join(', ')}` : 'no levels found'}{p.facilities?.length ? `; facilities ${p.facilities.join(', ')}` : ''}{p.achievements?.length ? `; achievements ${p.achievements.join(', ')}` : ''}{p.admission ? `; admissions ${p.admission}` : ''}{p.error ? ` (${p.error})` : ''}</li>)}
           </ul>
         </div>
       )}
@@ -159,6 +159,8 @@ export default function SiteDataPanel() {
         {findings.map((f) => {
           const c = choices[f.id] ?? { boards: [], levels: [], admission: false };
           const picked = c.levels ?? [];
+          const pickedFac = c.facilities ?? [];
+          const pickedAch = c.achievements ?? [];
           return (
             <div key={f.id} data-testid={`finding-${f.id}`} className="border border-gray-200 rounded-lg p-4 bg-gray-50">
               <div className="flex justify-between gap-3">
@@ -198,6 +200,34 @@ export default function SiteDataPanel() {
                 </div>
               ))}
 
+              {f.facilities.length > 0 && <p className="mt-3 text-xs font-bold uppercase text-gray-500">Facilities</p>}
+              {f.facilities.map((x) => (
+                <div key={x.facility} className="mt-1 text-sm">
+                  <label className="flex items-start gap-2">
+                    {f.status === 'pending' && (
+                      <input type="checkbox" data-testid={`pick-${f.id}-fac-${x.facility}`} checked={pickedFac.includes(x.facility)}
+                        onChange={(e) => setChoice(f.id, { facilities: e.target.checked ? [...pickedFac, x.facility] : pickedFac.filter((k) => k !== x.facility) })} />
+                    )}
+                    <span>{facilityHitLabel(x)}</span>
+                  </label>
+                  {x.evidence && <p className="text-xs text-gray-700 ml-6 italic">&ldquo;{x.evidence}&rdquo; {x.url && <a className="underline" href={x.url} target="_blank" rel="noreferrer noopener">source</a>}</p>}
+                </div>
+              ))}
+
+              {f.achievements.length > 0 && <p className="mt-3 text-xs font-bold uppercase text-gray-500">Achievements the school claims</p>}
+              {f.achievements.map((a, i) => (
+                <div key={i} className="mt-1 text-sm">
+                  <label className="flex items-start gap-2">
+                    {f.status === 'pending' && (
+                      <input type="checkbox" data-testid={`pick-${f.id}-ach-${i}`} checked={pickedAch.includes(i)}
+                        onChange={(e) => setChoice(f.id, { achievements: e.target.checked ? [...pickedAch, i] : pickedAch.filter((k) => k !== i) })} />
+                    )}
+                    <span>{achievementHitLabel(a)}</span>
+                  </label>
+                  {a.url && <p className="text-xs ml-6"><a className="underline text-blue-700" href={a.url} target="_blank" rel="noreferrer noopener">Check it on the school&apos;s page</a></p>}
+                </div>
+              ))}
+
               {f.admission && (
                 <div className="mt-2 text-sm">
                   <label className="flex items-start gap-2">
@@ -216,9 +246,9 @@ export default function SiteDataPanel() {
                     placeholder="Note (optional)" className="border border-gray-300 rounded px-2 py-1 text-sm text-black" />
                   <button data-testid={`save-${f.id}`} onClick={() => decide(f, c)} disabled={busyId === f.id}
                     className="bg-blue-600 text-white px-3 py-1.5 rounded text-sm font-bold disabled:opacity-50">
-                    {c.boards.length || picked.length || c.admission ? 'Accept what is ticked' : 'Reject (nothing ticked)'}
+                    {c.boards.length || picked.length || pickedFac.length || pickedAch.length || c.admission ? 'Accept what is ticked' : 'Reject (nothing ticked)'}
                   </button>
-                  <button data-testid={`reject-${f.id}`} onClick={() => decide(f, { boards: [], levels: [], admission: false })} disabled={busyId === f.id}
+                  <button data-testid={`reject-${f.id}`} onClick={() => decide(f, { boards: [], levels: [], facilities: [], achievements: [], admission: false })} disabled={busyId === f.id}
                     className="px-3 py-1.5 rounded text-sm font-bold bg-gray-200 text-gray-800 disabled:opacity-50">Reject all</button>
                 </div>
               )}
