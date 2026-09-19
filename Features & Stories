@@ -2,7 +2,7 @@
 
 **Author:** Rajasekharan Gopakumar
 **Document Status:** v1.1 — MVP built; each story marked Built, Partly built or Planned
-**Last Updated:** 19 September 2026
+**Last Updated:** 20 September 2026
 
 ---
 
@@ -111,6 +111,7 @@
 - **US8.3 (Kidscover Admin):** As an admin, I want to see every change any school makes (who, when, before and after) and undo any of them, so the data stays accurate.
 - **US8.4 (Kidscover Admin):** As an admin, I want to find free-licensed photos of a school on Wikimedia Commons and use one with its author and licence.
 - **US8.5 (Backend):** As a system, I need the change log written by database triggers (so nothing escapes it), edits allowed only through functions that check the school, and a photo bucket where each school can write only to its own folder.
+- **US8.6 (Kidscover Admin / School Admin):** As an admin or a school's staff member, I want to set the school's levels by hand when the automatic ones are missing ("Level not stated") or wrong, and hand it back to the automatic levels later, with every change in the change log.
 
 ---
 
