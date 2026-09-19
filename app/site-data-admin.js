@@ -1,5 +1,6 @@
 // Logic for the School data tab: reading school websites and reviewing what was found. No React and no network here,
 // so it can be tested on its own. Every function that talks to the database takes the client as an argument.
+import { facilityLabel, kindLabel } from './profiles-admin';
 
 export const VIEWS = [
   { key: 'pending', label: 'Waiting for review' },
@@ -9,7 +10,7 @@ export const VIEWS = [
 ];
 
 export const FINDING_SELECT =
-  'id, school_id, checked_at, website, pages, boards, levels, admission, error, review_status, reviewed_at, review_note, ' +
+  'id, school_id, checked_at, website, pages, boards, levels, facilities, achievements, admission, error, review_status, reviewed_at, review_note, ' +
   'schools(name, board, boards, levels, website, admissions_open, admissions_year)';
 
 export const BATCH = 6;             // schools per call of the reader (it allows up to 10)
@@ -29,6 +30,8 @@ export function normalizeFinding(row) {
     checkedAt: row.checked_at ?? '',
     boards: Array.isArray(row.boards) ? row.boards : [],
     levels: Array.isArray(row.levels) ? row.levels : [],
+    facilities: Array.isArray(row.facilities) ? row.facilities : [],
+    achievements: Array.isArray(row.achievements) ? row.achievements : [],
     admission: row.admission ?? null,
     pages: Array.isArray(row.pages) ? row.pages : [],
     error: row.error ?? '',
@@ -45,6 +48,9 @@ export function defaultChoice(f) {
   return {
     boards: f.boards.filter((b) => b.strong || isConfirmed(b)).map((b) => b.board),
     levels: (f.levels ?? []).filter((l) => l.strong).map((l) => l.level),
+    facilities: (f.facilities ?? []).filter((x) => x.strong).map((x) => x.facility),
+    // board results with a year are ticked; placements, alumni and awards are claims an admin should read first
+    achievements: (f.achievements ?? []).map((a, i) => ((a.kind === 'class10' || a.kind === 'class12') && a.year ? i : -1)).filter((i) => i >= 0),
     admission: !!(f.admission && !f.admission.stale && f.admission.year),
   };
 }
@@ -59,6 +65,9 @@ export const LEVEL_NAMES = { daycare: 'Daycare', preschool: 'Preschool (nursery,
 export const levelLabel = (hit) => `${LEVEL_NAMES[hit.level] ?? hit.level}${hit.strong ? '' : ' (weak: only mentioned)'}`;
 export const levelsText = (levels) => (levels?.length ? levels.map((l) => (LEVEL_NAMES[l] ?? l).replace(/ \(.*\)$/, '')).join(', ') : 'not stated');
 
+export const facilityHitLabel = (hit) => `${facilityLabel(hit.facility)}${hit.detail ? `: ${hit.detail}` : ''}${hit.strong ? '' : ' (weak: only mentioned)'}`;
+export const achievementHitLabel = (a) => `${kindLabel(a.kind)}${a.year ? `, ${a.year}` : ''}: ${a.text}`;
+
 export function admissionLabel(a) {
   if (!a) return '';
   const what = a.status === 'open' ? 'Admissions open' : 'Admissions closed';
@@ -72,8 +81,12 @@ export function reviewCall(f, choice, note) {
   const boards = [...new Set(choice.boards ?? [])].filter((b) => found.has(b));
   const foundLevels = new Set((f.levels ?? []).map((l) => l.level));
   const levels = [...new Set(choice.levels ?? [])].filter((l) => foundLevels.has(l));
+  const foundFacilities = new Set((f.facilities ?? []).map((x) => x.facility));
+  const facilities = [...new Set(choice.facilities ?? [])].filter((x) => foundFacilities.has(x));
+  const count = (f.achievements ?? []).length;
+  const achievements = [...new Set(choice.achievements ?? [])].filter((i) => Number.isInteger(i) && i >= 0 && i < count).sort((a, b) => a - b);
   if (choice.admission && (!f.admission || f.admission.stale)) return { error: 'That admission notice cannot be used.' };
-  return { p_finding: f.id, p_boards: boards, p_use_admission: !!choice.admission, p_note: (note ?? '').trim() || null, p_levels: levels };
+  return { p_finding: f.id, p_boards: boards, p_use_admission: !!choice.admission, p_note: (note ?? '').trim() || null, p_levels: levels, p_facilities: facilities, p_achievements: achievements };
 }
 
 // Pending findings whose CBSE board is confirmed by CBSE's own record: safe to accept in one go (the board only).
@@ -90,6 +103,7 @@ export function progressLine(p) {
 export function friendlyError(error) {
   const msg = String(error?.message ?? error ?? '');
   if (/admin only|admin_only|permission denied|row-level security/i.test(msg)) return 'Only admins can do this.';
+  if (/school_site_findings\.(facilities|achievements)|p_facilities|p_achievements|20260919001300/i.test(msg)) return 'Run the 20260919001300_facilities_achievements_from_websites.sql migration first.';
   if (/school_site_findings\.levels|site_levels|p_levels|20260919001100/i.test(msg)) return 'Run the 20260919001100_levels_from_websites.sql migration first.';
   if (/not_configured|20260919000800|last_site_check_at|school_site_findings|schema cache/i.test(msg)) return 'Run the 20260919000800_school_website_findings.sql migration first.';
   if (/404|not found/i.test(msg) && /function/i.test(msg)) return 'The read-school-websites function is not deployed yet.';
