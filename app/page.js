@@ -82,7 +82,7 @@ export default function RootRouting() {
   if (!session) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-        <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-200 w-full max-w-md">
+        <div className="bg-white text-gray-900 p-8 rounded-xl shadow-sm border border-gray-200 w-full max-w-md">
           <h1 className="text-3xl font-black text-gray-900 mb-6 text-center">Kidscover</h1>
           
           <form onSubmit={handleAuth} className="mb-6">
@@ -260,7 +260,7 @@ function AdminWebDashboard({ profile }) {
       ) : activeSubTab === 'reviews' ? (
         <ReviewsPanel onChanged={fetchPendingReviews} />
       ) : activeSubTab === 'applications' ? (
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden p-6">
+        <div className="bg-white text-gray-900 border border-gray-200 rounded-xl shadow-sm overflow-hidden p-6">
           <h2 className="text-lg font-bold text-gray-900 mb-4">Submitted Applications</h2>
           {applications.length === 0 ? (
             <p className="text-gray-500 italic text-sm">No applications found in pipeline.</p>

@@ -108,7 +108,7 @@ export default function SiteDataPanel() {
   const confirmedCount = confirmedCbse(findings).length;
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6" data-testid="site-panel">
+    <div className="bg-white text-gray-900 border border-gray-200 rounded-xl shadow-sm p-6" data-testid="site-panel">
       <h2 className="text-lg font-bold text-gray-900 mb-1">School data from school websites</h2>
       <p className="text-sm text-gray-600 mb-4">
         Reads each school&apos;s own website for its board and whether admissions are open, and checks CBSE affiliation

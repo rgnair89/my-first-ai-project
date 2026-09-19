@@ -155,7 +155,7 @@ export default function SweepPanel() {
   const finished = progress && !running && left === 0 && !progress.stopped;
 
   return (
-    <div className="bg-white border border-gray-200 p-6 rounded-xl shadow-sm mb-8">
+    <div className="bg-white text-gray-900 border border-gray-200 p-6 rounded-xl shadow-sm mb-8">
       <h2 className="text-lg font-bold text-gray-900 mb-2">Mumbai School Data Pipeline</h2>
       <p className="text-sm text-gray-600 mb-4">
         Searches Mumbai, Thane and Navi Mumbai on Google Places in small map cells, adds new schools and links existing ones.

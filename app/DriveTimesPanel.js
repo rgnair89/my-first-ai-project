@@ -33,7 +33,7 @@ export default function DriveTimesPanel() {
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 mb-6" data-testid="drive-panel">
+    <div className="bg-white text-gray-900 border border-gray-200 rounded-xl shadow-sm p-6 mb-6" data-testid="drive-panel">
       <div className="flex justify-between items-start gap-4">
         <div>
           <h2 className="text-lg font-bold text-gray-900">Drive times (Google Routes)</h2>

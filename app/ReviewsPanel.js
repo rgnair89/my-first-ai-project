@@ -58,7 +58,7 @@ export default function ReviewsPanel({ onChanged }) {
   const shown = reviews.filter((r) => inView(r, view)).sort(sortFor(view));
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6" data-testid="reviews-panel">
+    <div className="bg-white text-gray-900 border border-gray-200 rounded-xl shadow-sm p-6" data-testid="reviews-panel">
       <h2 className="text-lg font-bold text-gray-900 mb-1">Parent reviews</h2>
       <p className="text-sm text-gray-600 mb-4">
         New reviews wait here until you publish them. Three reports from different parents also send a published review back to Waiting.
