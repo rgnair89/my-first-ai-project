@@ -8,6 +8,7 @@ import EnquiriesPanel from './EnquiriesPanel';
 import DriveTimesPanel from './DriveTimesPanel';
 import SiteDataPanel from './SiteDataPanel';
 import CategoriesPanel from './CategoriesPanel';
+import SchoolProfilePanel from './SchoolProfilePanel';
 import { loadPendingCount } from './reviews-admin';
 import { loadOpenCount } from './enquiries-admin';
 
@@ -170,7 +171,24 @@ export default function RootRouting() {
   }
 
   if (profile?.role === 'admin') return <AdminWebDashboard profile={profile} />;
+  if (profile?.role === 'school_admin') return <SchoolStaffDashboard profile={profile} userId={session.user.id} />;
   return <ParentWebDashboard profile={profile} />;
+}
+
+// A school's own staff: they edit their school's page (photo, facilities, achievements) and nothing else.
+function SchoolStaffDashboard({ profile, userId }) {
+  return (
+    <div className="p-8 max-w-6xl mx-auto">
+      <div className="flex justify-between items-center mb-8">
+        <div>
+          <h1 className="text-2xl font-bold text-black">Kidscover for Schools</h1>
+          <span className="text-xs text-blue-700 font-bold">{profile?.first_name} {profile?.last_name} | {profile?.email}</span>
+        </div>
+        <button onClick={() => supabase.auth.signOut()} className="text-gray-500 font-bold hover:text-black">Sign Out</button>
+      </div>
+      <SchoolProfilePanel mode="staff" userId={userId} />
+    </div>
+  );
 }
 
 function ParentWebDashboard({ profile }) {
@@ -190,7 +208,7 @@ function ParentWebDashboard({ profile }) {
 }
 
 function AdminWebDashboard({ profile }) {
-  const [activeSubTab, setActiveSubTab] = useState('applications'); // 'applications' | 'enquiries' | 'reviews' | 'schooldata' | 'categories'
+  const [activeSubTab, setActiveSubTab] = useState('applications'); // 'applications' | 'enquiries' | 'reviews' | 'schooldata' | 'categories' | 'profiles'
   const [applications, setApplications] = useState([]);
   const [openEnquiries, setOpenEnquiries] = useState(0);
   const [pendingReviews, setPendingReviews] = useState(0);
@@ -260,9 +278,17 @@ function AdminWebDashboard({ profile }) {
         >
           Categories
         </button>
+        <button
+          onClick={() => setActiveSubTab('profiles')}
+          className={`px-4 py-2 rounded-lg font-bold text-sm ${activeSubTab === 'profiles' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
+        >
+          School Profiles
+        </button>
       </div>
 
-      {activeSubTab === 'categories' ? (
+      {activeSubTab === 'profiles' ? (
+        <SchoolProfilePanel mode="admin" />
+      ) : activeSubTab === 'categories' ? (
         <CategoriesPanel />
       ) : activeSubTab === 'schooldata' ? (
         <SiteDataPanel />
