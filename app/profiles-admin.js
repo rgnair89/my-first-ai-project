@@ -38,9 +38,16 @@ export const kindLabel = (key) => ACHIEVEMENT_KINDS.find((k) => k.key === key)?.
 
 export const SOURCE_LABELS = { school: 'from the school', 'school website': "from the school's website", kidscover: 'checked by Kidscover' };
 
+// Levels, in the order parents see them.
+export const LEVEL_NAMES = { daycare: 'Daycare', preschool: 'Preschool (nursery, KG)', primary: 'Primary (classes 1 to 7)', secondary: 'Secondary (classes 8 to 12)' };
+export const LEVEL_ORDER = Object.keys(LEVEL_NAMES);
+export const levelsText = (levels) => (levels?.length ? levels.map((l) => (LEVEL_NAMES[l] ?? l).replace(/ \(.*\)$/, '')).join(', ') : 'not stated');
+
 export const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 export const PHOTO_MAX_BYTES = 5 * 1024 * 1024;
 export const PROFILE_SCHOOL_COLUMNS = 'id, name, address, website, is_hidden, category, photo_url, photo_source, photo_credit, photo_licence, photo_page_url';
+// Read on their own, so the rest of the page still works before 20260919001400 is run.
+export const LEVEL_COLUMNS = 'levels, profile_levels, profile_levels_source';
 
 export const cleanSearch = (text) => String(text ?? '').replace(/[,()*"\\%]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
 const stripHtml = (s) => String(s ?? '').replace(/<[^>]*>/g, ' ').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
@@ -50,6 +57,7 @@ export function friendlyError(error) {
   if (/only change your own school|only a kidscover admin|permission denied|row-level security|42501/i.test(msg)) {
     return /only a kidscover admin/i.test(msg) ? msg : 'You can only change your own school.';
   }
+  if (/profile_levels|set_school_levels|20260919001400/i.test(msg)) return 'Run the 20260919001400_hand_set_levels.sql migration first.';
   if (/school_facilities|school_achievements|school_change_log|school_staff|set_school_|save_school_achievement|photo_url|schema cache|20260919001200/i.test(msg)) {
     return 'Run the 20260919001200_school_profiles.sql migration first.';
   }
@@ -60,16 +68,21 @@ export function friendlyError(error) {
 
 // ---- one school's profile ----
 export async function loadProfile(db, schoolId) {
-  const [s, f, a] = await Promise.all([
+  const [s, f, a, l] = await Promise.all([
     db.from('schools').select(PROFILE_SCHOOL_COLUMNS).eq('id', schoolId).maybeSingle(),
     db.from('school_facilities').select('facility, detail, source, source_url, updated_at').eq('school_id', schoolId),
     db.from('school_achievements').select('id, kind, text, year, source, source_url, updated_at').eq('school_id', schoolId)
       .order('kind', { ascending: true }).order('year', { ascending: false, nullsFirst: false }),
+    db.from('schools').select(LEVEL_COLUMNS).eq('id', schoolId).maybeSingle(),
   ]);
   const error = s.error ?? f.error ?? a.error ?? null;
   if (error) return { error };
   if (!s.data) return { error: { message: 'That school is not in the list any more.' } };
-  return { school: s.data, facilities: f.data ?? [], achievements: a.data ?? [], error: null };
+  return {
+    school: s.data, facilities: f.data ?? [], achievements: a.data ?? [],
+    levels: l.error ? null : { now: l.data?.levels ?? [], hand: l.data?.profile_levels ?? null, source: l.data?.profile_levels_source ?? null },
+    levelsError: l.error ? friendlyError(l.error) : '', error: null,
+  };
 }
 
 // Admins find any school by name or area (hidden places included, marked); staff get the schools they look after.
@@ -103,6 +116,21 @@ export async function setFacility(db, schoolId, key, has, detail) {
   const { error } = await db.rpc('set_school_facility', { p_school: schoolId, p_facility: key, p_has: !!has, p_detail: String(detail ?? '').trim() || null });
   return { error: error ?? null };
 }
+
+// levels: some of LEVEL_ORDER, or null to go back to the levels worked out automatically.
+export function checkLevels(levels) {
+  if (levels === null) return '';
+  if (!Array.isArray(levels) || !levels.length || !levels.every((l) => LEVEL_ORDER.includes(l))) return 'Tick at least one level, or go back to automatic.';
+  return '';
+}
+export async function setLevels(db, schoolId, levels) {
+  const problem = checkLevels(levels);
+  if (problem) return { error: { message: problem } };
+  const { error } = await db.rpc('set_school_levels', { p_school: schoolId, p_levels: levels === null ? null : LEVEL_ORDER.filter((l) => levels.includes(l)) });
+  return { error: error ?? null };
+}
+export const levelsSourceText = (lv) => (lv?.hand ? `Set by ${lv.source === 'school' ? 'the school' : 'Kidscover'}.`
+  : "Worked out automatically, from the school's name, Google and accepted website findings.");
 
 export function checkAchievement(a) {
   if (!ACHIEVEMENT_KINDS.some((k) => k.key === a.kind)) return 'Choose what kind of achievement it is.';
@@ -244,6 +272,11 @@ export function describeChange(c) {
   }
   if (c.what === 'photo') return c.action === 'removed' ? 'Photo removed' : `Photo ${verb} (${c.after?.source === 'wikimedia' ? 'Wikimedia Commons' : 'uploaded by the school'})`;
   if (c.what === 'staff') return `Staff member ${verb}`;
+  if (c.what === 'levels') {
+    if (c.action === 'removed') return `Levels back to automatic (were set to ${levelsText(c.before?.levels)})`;
+    if (c.action === 'changed') return `Levels changed: ${levelsText(c.before?.levels)} \u2192 ${levelsText(c.after?.levels)}`;
+    return `Levels set to ${levelsText(c.after?.levels)}`;
+  }
   return `${c.what} ${verb}`;
 }
 export const whoText = (c) => (c.changed_by_role === 'admin' ? 'Kidscover admin' : c.changed_by_role === 'school_admin' ? 'school staff' : 'system');

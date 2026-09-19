@@ -1,6 +1,8 @@
 // Logic for the School data tab: reading school websites and reviewing what was found. No React and no network here,
 // so it can be tested on its own. Every function that talks to the database takes the client as an argument.
-import { facilityLabel, kindLabel } from './profiles-admin';
+import { facilityLabel, kindLabel, LEVEL_NAMES } from './profiles-admin';
+
+export { LEVEL_NAMES, levelsText } from './profiles-admin';
 
 export const VIEWS = [
   { key: 'pending', label: 'Waiting for review' },
@@ -61,9 +63,7 @@ export function boardLabel(hit) {
   return `${hit.board}${hit.strong ? '' : ' (weak: only mentioned)'}`;
 }
 
-export const LEVEL_NAMES = { daycare: 'Daycare', preschool: 'Preschool (nursery, KG)', primary: 'Primary (classes 1 to 7)', secondary: 'Secondary (classes 8 to 12)' };
 export const levelLabel = (hit) => `${LEVEL_NAMES[hit.level] ?? hit.level}${hit.strong ? '' : ' (weak: only mentioned)'}`;
-export const levelsText = (levels) => (levels?.length ? levels.map((l) => (LEVEL_NAMES[l] ?? l).replace(/ \(.*\)$/, '')).join(', ') : 'not stated');
 
 export const facilityHitLabel = (hit) => `${facilityLabel(hit.facility)}${hit.detail ? `: ${hit.detail}` : ''}${hit.strong ? '' : ' (weak: only mentioned)'}`;
 export const achievementHitLabel = (a) => `${kindLabel(a.kind)}${a.year ? `, ${a.year}` : ''}: ${a.text}`;

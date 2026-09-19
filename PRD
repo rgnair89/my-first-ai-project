@@ -3,7 +3,7 @@
 **Document Status:** v1.1 — MVP built and live-tested; next phase planned
 **Author:** Rajasekharan Gopakumar
 **Target Launch:** Web & Mobile App (iOS/Android)
-**Last Updated:** 19 September 2026
+**Last Updated:** 20 September 2026
 
 ---
 
@@ -73,7 +73,7 @@ Status: **Built** (in the app or portal today), **Partly built**, **Planned**.
 
 ### 3.4 School Detail Page (P1) — Built
 - **Photo:** uploaded by the school (it confirms it may publish it) or a free-licensed Wikimedia Commons photo shown with its author and licence; with no photo, a drawn school in colours of its own. No paid or copyrighted image sources.
-- **Facts, each with its source:** levels (from the name, Google and, once accepted, the school's website); board ("confirmed by CBSE's own record", "from the school's website", "from the school's name"); admission status with year ("from the school's website, checked Sep 2026"); Google rating; parent reviews.
+- **Facts, each with its source:** levels (set by the school or Kidscover if they have set them; otherwise from the name, Google and, once accepted, the school's website); board ("confirmed by CBSE's own record", "from the school's website", "from the school's name"); admission status with year ("from the school's website, checked Sep 2026"); Google rating; parent reviews.
 - **Facilities** (20 kinds: cafeteria, open and indoor play, pool, courts, library, science / computer / maths / STEM / AI labs, smart classrooms, auditorium, art and music rooms, school bus, medical room, CCTV, air conditioning, special needs support, teacher-student ratio).
 - **Achievements** the school claims: class 10 and class 12 results, college placements, notable alumni, awards; newest first; each marked with its source and linked to where it was published.
 - **Ask about admissions** (schools only) and the school's website link.
@@ -103,7 +103,8 @@ Status: **Built** (in the app or portal today), **Partly built**, **Planned**.
 - **Not used (and not worked around):** the CISCE directory (behind a CAPTCHA), open UDISE+ extracts (no board column, no licence), and parts of CBSE's site that refuse automated access.
 
 ### 3.8 School Profiles, School Staff & the Change Log — Built
-- A Kidscover admin adds a school's staff by email (they sign up first); staff can edit only their own school: photo, facilities, achievements.
+- A Kidscover admin adds a school's staff by email (they sign up first); staff can edit only their own school: levels, photo, facilities, achievements.
+- Levels set by hand (daycare, preschool, primary, secondary) replace the automatic ones, so a school whose name and website say nothing can still be found under the right level, and a wrong level can be removed. "Back to automatic" returns the school to the rules.
 - Changes go live at once. Database triggers record every change (who, their role, when, before and after), so nothing escapes the log. A Kidscover admin sees all changes, and can undo the latest change to anything; the undo is logged too.
 - Photos upload to a public storage bucket, one folder per school, JPEG / PNG / WebP up to 5 MB; only that school's staff (or an admin) can write to its folder.
 

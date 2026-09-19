@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/utils/supabase';
 import {
-  FACILITIES, ACHIEVEMENT_KINDS, SOURCE_LABELS, kindLabel, friendlyError, loadProfile, findSchools, loadMySchools,
+  FACILITIES, ACHIEVEMENT_KINDS, SOURCE_LABELS, LEVEL_NAMES, LEVEL_ORDER, kindLabel, levelsText, levelsSourceText, setLevels,
+  friendlyError, loadProfile, findSchools, loadMySchools,
   setFacility, saveAchievement, deleteAchievement, uploadPhoto, chooseWikimediaPhoto, removePhoto, searchWikimedia,
   photoCredit, loadStaff, addStaff, removeStaff, loadChanges, revertChange, describeChange, whoText, canRevert,
 } from './profiles-admin';
@@ -28,6 +29,7 @@ export default function SchoolProfilePanel({ mode = 'admin', userId = null }) {
   const [staff, setStaff] = useState([]);
   const [changes, setChanges] = useState([]);
   const [details, setDetails] = useState({});
+  const [ticked, setTicked] = useState([]);
   const [ach, setAch] = useState(EMPTY_ACH);
   const [file, setFile] = useState(null);
   const [fileKey, setFileKey] = useState(0); // a new key empties the file picker after an upload
@@ -44,6 +46,7 @@ export default function SchoolProfilePanel({ mode = 'admin', userId = null }) {
     if (res.error) { setError(friendlyError(res.error)); return; }
     setProfile(res);
     setDetails(Object.fromEntries(res.facilities.map((f) => [f.facility, f.detail ?? ''])));
+    setTicked(res.levels ? (res.levels.hand ?? res.levels.now) : []);
     if (st) setStaff(st.staff);
     if (ch) setChanges(ch.changes);
   }
@@ -109,7 +112,7 @@ export default function SchoolProfilePanel({ mode = 'admin', userId = null }) {
     <div className="bg-white text-gray-900 border border-gray-200 rounded-xl shadow-sm p-6" data-testid="profiles-panel">
       <h2 className="text-lg font-bold text-gray-900 mb-1">School profiles</h2>
       <p className="text-sm text-gray-600 mb-4">
-        The photo, facilities and achievements parents see on a school&apos;s page. Changes show at once, and every change is
+        The levels, photo, facilities and achievements parents see on a school&apos;s page. Changes show at once, and every change is
         recorded{isAdmin ? '; you can undo any of them.' : ' (Kidscover can see and undo them).'}
       </p>
       {error && <p data-testid="profile-error" className="text-sm font-bold text-red-700 bg-red-50 border border-red-200 rounded p-3 mb-3">{error}</p>}
@@ -154,6 +157,33 @@ export default function SchoolProfilePanel({ mode = 'admin', userId = null }) {
             </div>
             {isAdmin && <button data-testid="profile-back" onClick={() => { setSchoolId(null); setProfile(null); }} className={`${btn} bg-gray-200 text-gray-800`}>Back to all schools</button>}
           </div>
+
+          {/* ---- levels ---- */}
+          <section className="mb-6">
+            <h4 className="font-bold mb-2">Levels</h4>
+            {profile.levelsError ? <p data-testid="levels-error" className="text-sm text-red-700">{profile.levelsError}</p> : (
+              <>
+                <p data-testid="levels-now" className="text-sm">Parents see: <span className="font-bold">{levelsText(profile.levels.now)}</span></p>
+                <p data-testid="levels-source" className="text-xs text-gray-600 mb-2">{levelsSourceText(profile.levels)}</p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mb-2">
+                  {LEVEL_ORDER.map((l) => (
+                    <label key={l} className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" data-testid={`level-${l}`} checked={ticked.includes(l)} disabled={busy}
+                        onChange={(e) => setTicked((t) => (e.target.checked ? [...t, l] : t.filter((x) => x !== l)))} />
+                      {LEVEL_NAMES[l]}
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-600 mb-2">Saving replaces the automatic levels. Use it when they are missing or wrong.</p>
+                <div className="flex gap-2">
+                  <button data-testid="levels-save" disabled={busy || !ticked.length} onClick={() => act(() => setLevels(supabase, school.id, ticked), `Levels saved: ${levelsText(LEVEL_ORDER.filter((l) => ticked.includes(l)))}.`)}
+                    className={`${btn} bg-blue-600 text-white`}>Save levels</button>
+                  {profile.levels.hand && <button data-testid="levels-auto" disabled={busy} onClick={() => act(() => setLevels(supabase, school.id, null), 'Levels are worked out automatically again.')}
+                    className={`${btn} bg-gray-200 text-gray-800`}>Back to automatic</button>}
+                </div>
+              </>
+            )}
+          </section>
 
           {/* ---- photo ---- */}
           <section className="mb-6">
