@@ -148,8 +148,12 @@ function htmlToText(html: string): string {
     .trim();
 }
 
-// Up to MAX_EXTRA_PAGES links on the same site most likely to state the board or admissions.
-function pickExtraPages(html: string, base: URL): string[] {
+// Up to MAX_EXTRA_PAGES links on the same site most likely to state the board or admissions. When one website serves
+// several schools (a trust's site), this school's pages go before the others: every distinctive word of its name is
+// in the link. Its own page ("ab-goregaokar-english-school.php") beats another school's admissions page, and its own
+// admissions page beats both. A page with the name but no school word (the trust's sports club) gets nothing extra.
+function pickExtraPages(html: string, base: URL, schoolName = ""): string[] {
+  const own = [...nameTokens(schoolName)];
   const scored = new Map<string, number>();
   for (const m of html.matchAll(/<a\b[^>]*href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>([\s\S]*?)<\/a>/gi)) {
     const href = decodeEntities(m[1] ?? m[2] ?? m[3] ?? "");
@@ -166,6 +170,11 @@ function pickExtraPages(html: string, base: URL): string[] {
     if (/affiliat/.test(hay)) score = Math.max(score, 4);
     if (/admission|enrol|registration/.test(hay)) score = Math.max(score, 3);
     if (/about|overview|who-we-are|our-school|curriculum|academics/.test(hay)) score = Math.max(score, 1);
+    const words = " " + hay.replace(/[^a-z0-9]+/g, " ") + " ";
+    if (own.length && own.every((w) => words.includes(" " + w + " "))) {
+      if (score > 0) score += 1;
+      else if (/school|vidyalay|mandir|convent/.test(hay)) score = 3.5;
+    }
     if (score > 0 && score > (scored.get(key) ?? 0)) scored.set(key, score);
   }
   return [...scored].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length).slice(0, MAX_EXTRA_PAGES).map(([k]) => k);
@@ -192,6 +201,11 @@ const BOARD_RULES: [string, RegExp, number, string?][] = [
   ["State Board", /maharashtra state board|state board of secondary and higher secondary education|\bMSBSHSE\b/i, 5],
   ["State Board", /\bS\.?\s?S\.?\s?C\.?\s+board\b|\bstate board\b/i, 3],
   ["State Board", /\bS\.S\.C\.?(?![a-z])|\bSSC\b/, 1],
+  // Marathi and Hindi (after latinInitials): the board's full name; "affiliated to the SSC / state board"; "SSC board"
+  // or "state board". A trust's own name ("... shikshan mandal", an education society) is not a board and not matched.
+  ["State Board", /\u092e\u0939\u093e\u0930\u093e\u0937\u094d\u091f\u094d\u0930\s*\u0930\u093e\u091c\u094d\u092f\s*\u092e\u093e\u0927\u094d\u092f\u092e\u093f\u0915\s*(?:\u0935|\u0906\u0923\u093f|\u090f\u0935\u0902|\u0914\u0930)?\s*\u0909\u091a\u094d\u091a\s*\u092e\u093e\u0927\u094d\u092f\u092e\u093f\u0915\s*\u0936\u093f\u0915\u094d\u0937/, 5],
+  ["State Board", /(?:(?<![A-Za-z])S\.?\s?S\.?\s?C\.?|(?<![\u0900-\u097f])(?:\u0930\u093e\u091c\u094d\u092f|\u0938\u094d\u091f\u0947\u091f))\s*(?:\u0936\u093f\u0915\u094d\u0937\u0923\s*|\u0936\u093f\u0915\u094d\u0937\u093e\s*)?(?:\u092c\u094b\u0930\u094d\u0921|\u092e\u0902\u0921\u0933|\u092e\u0902\u0921\u0932)\S*\s*(?:\u0938\u0947\s+)?(?:\u0938\u0902\u0932\u0917\u094d\u0928|\u0938\u0932\u0902\u0917\u094d\u0928|\u0938\u0902\u092c\u0926\u094d\u0927|\u092e\u093e\u0928\u094d\u092f\u0924\u093e\u092a\u094d\u0930\u093e\u092a\u094d\u0924)/, 5],
+  ["State Board", /(?:(?<![A-Za-z])S\.?\s?S\.?\s?C\.?|(?<![\u0900-\u097f])(?:\u0930\u093e\u091c\u094d\u092f|\u0938\u094d\u091f\u0947\u091f))\s*(?:\u0936\u093f\u0915\u094d\u0937\u0923\s*|\u0936\u093f\u0915\u094d\u0937\u093e\s*)?(?:\u092c\u094b\u0930\u094d\u0921|\u092e\u0902\u0921\u0933|\u092e\u0902\u0921\u0932)/, 3],
   ["NIOS", /national institute of open schooling/i, 4],
   ["NIOS", /\bNIOS\b/, 2],
 ];
@@ -203,13 +217,22 @@ const CAPTURE_RULES: [string, RegExp, number, string][] = [
   ["ICSE", /(?:school|cisce|icse)\s*code[\s:.\-]*?(MA\s?\d{3})\b/i, 4, "schoolCode"],
 ];
 
+// Marathi and Hindi pages write the boards' initials in Devanagari, with or without dots ("es. es. si." for S.S.C.).
+// They are spelled in Latin letters before reading, so the rules and the sentence splitter treat them like "S.S.C.".
+const DEVANAGARI_INITIALS: [RegExp, string][] = [
+  [/(?<![\u0900-\u097f])\u090f\u0938\u094d?\.?\s?\u090f\u0938\u094d?\.?\s?\u0938\u0940(?![\u0900-\u097f])\.?/g, "S.S.C."],
+  [/(?<![\u0900-\u097f])\u0938\u0940\.?\s?\u092c\u0940\.?\s?\u090f\u0938\u094d?\.?\s?\u0908(?![\u0900-\u097f])\.?/g, "C.B.S.E."],
+  [/(?<![\u0900-\u097f])\u0906\u092f\.?\s?\u0938\u0940\.?\s?\u090f\u0938\u094d?\.?\s?\u0908(?![\u0900-\u097f])\.?/g, "I.C.S.E."],
+];
+const latinInitials = (text: string) => DEVANAGARI_INITIALS.reduce((t, [re, to]) => t.replace(re, to), text);
+
 // Split into sentences, without splitting after "No." or "St." or an initial ("S.S.C."), and at the breaks left
-// where one block of the page ends and the next begins.
+// where one block of the page ends and the next begins. Hindi and Marathi sentences may end with a danda.
 const ABBREVIATION = /\b(No|Nos|St|Dr|Mr|Mrs|Ms|Sr|Jr|Pvt|Ltd|Std|Aff|Affl|Reg|Govt|Estd|Est|Vol|Sec|Sch|[A-Z])\./g;
 function sentences(text: string): string[] {
   const mark = String.fromCharCode(1);
   return text.replace(ABBREVIATION, "$1" + mark)
-    .split(/(?<=[.!?|])\s+|\s+\.\s+/)
+    .split(/(?<=[.!?|\u0964\u0965])\s+|\s+\.\s+/)
     .map((s) => s.split(mark).join(".").replace(/\s+\.$/, "").trim())
     .filter((s) => s.length > 3);
 }
@@ -219,7 +242,8 @@ const clip = (s: string, n = 300) => (s.length <= n ? s : s.slice(0, n - 3).trim
 // A short piece of text around position i, for the evidence an admin reads.
 const around = (text: string, i: number, len: number) => clip(text.slice(Math.max(0, i - 120), i + len + 120).trim());
 
-function findBoards(text: string, url: string): BoardHit[] {
+function findBoards(page: string, url: string): BoardHit[] {
+  const text = latinInitials(page);
   const acc = new Map<string, BoardHit & { mentions: number; best: number }>();
   for (const [board, re, points, field] of CAPTURE_RULES) {
     const m = re.exec(text);
@@ -460,7 +484,7 @@ async function readSchool(deps: Deps, school: School, deadline: number): Promise
   const first = await read(home);
   if (first?.html) {
     const finalHome = safeUrl(first.url) ?? home;
-    for (const extra of pickExtraPages(first.html, finalHome)) {
+    for (const extra of pickExtraPages(first.html, finalHome, school.name)) {
       if (deps.now().getTime() > deadline) break;
       const u = safeUrl(extra);
       if (u) await read(u);
