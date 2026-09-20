@@ -10,12 +10,13 @@
 // Secrets it reads: GOOGLE_MAPS_API_KEY (already set for the school importer). No Supabase secret key: the function
 // talks to the database AS THE PARENT who called it, so the database rules (hidden schools, limits) apply to it.
 //
-// Request (POST, from the signed-in app): { "lat": 19.076, "lng": 72.878, "schoolIds": ["uuid", ...], "when": "school_run" | "now" }
+// Request (POST, from the signed-in app): { "lat": 19.076, "lng": 72.878, "schoolIds": ["uuid", ...], "when": "school_run" | "now" | "arrive" }
 //   at most 20 schools; the position must be inside the Mumbai region; it is rounded to about 100 m here as well.
 //   "school_run" = leaving at 7:30 am India time on the next weekday (Google can only plan car trips by departure
-//   time, not "arrive by"); "now" = leaving now.
+//   time, not "arrive by"); "now" = leaving now; "arrive" = in time for each school's own start of day, so the answer
+//   also says when to leave home. A school whose start time nobody has given is taken as 8:00 am, and says so.
 // Answer (always HTTP 200 unless something crashed):
-//   { ok: true, when, departure, times: { "<schoolId>": { minutes, km } | null }, lookupsLeft }
+//   { ok: true, when, departure, times: { "<schoolId>": { minutes, km, leaveBy?, startTime?, assumedStart? } | null }, lookupsLeft }
 //   { ok: false, code } with code one of: bad_request, outside_area, too_many_schools, sign_in, confirm_email,
 //   user_limit, daily_budget, switched_off, not_configured, routes_not_enabled, google_key_blocked,
 //   google_key_invalid, google_busy, google_timeout, google_error, failed. Admins also get a "detail" to fix setup.
@@ -32,6 +33,10 @@ const FIELD_MASK = "originIndex,destinationIndex,duration,distanceMeters,conditi
 // The same box the school importer is limited to. A position outside it would only buy answers about schools far away.
 const SERVICE_AREA = { latMin: 18.5, latMax: 19.7, lngMin: 72.5, lngMax: 73.5 };
 const MAX_SCHOOLS = 20;
+// "arrive" needs one Google lookup per start time on the screen, so only the four commonest are worked out.
+const MAX_START_GROUPS = 4;
+const DEFAULT_START_MINUTES = 8 * 60;   // when nobody has said when the school day starts
+const LEAVE_EARLY_MINUTES = 45;         // the traffic is asked about 45 minutes before the bell
 const GOOGLE_TIMEOUT_MS = 12000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const IST_OFFSET_MS = 330 * 60 * 1000; // India is UTC+5:30 all year
@@ -46,7 +51,7 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 }
 
-type Parsed = { lat: number; lng: number; ids: string[]; when: "school_run" | "now" };
+type Parsed = { lat: number; lng: number; ids: string[]; when: "school_run" | "now" | "arrive" };
 
 function inArea(lat: number, lng: number): boolean {
   return lat >= SERVICE_AREA.latMin && lat <= SERVICE_AREA.latMax && lng >= SERVICE_AREA.lngMin && lng <= SERVICE_AREA.lngMax;
@@ -64,24 +69,48 @@ function parseRequest(body: any): Parsed | { code: string } {
   const ids = [...new Set(schoolIds.map((x: string) => x.toLowerCase()))];
   if (ids.length > MAX_SCHOOLS) return { code: "too_many_schools" };
   const w = when ?? "school_run";
-  if (w !== "school_run" && w !== "now") return { code: "bad_request" };
+  if (w !== "school_run" && w !== "now" && w !== "arrive") return { code: "bad_request" };
   // never send Google more than about 100 m of precision, whatever the app sent
   return { lat: Math.round(lat * 1000) / 1000, lng: Math.round(lng * 1000) / 1000, ids, when: w };
 }
 
-// 7:30 am India time on the next weekday that is still at least 15 minutes away. Google refuses a departure time in
-// the past for car trips, and a weekday morning is when the school run happens.
-function schoolRunDeparture(now: Date): Date {
-  const earliest = now.getTime() + 15 * 60 * 1000;
+// A given time of day (in minutes after midnight, India time) on the next weekday that is still far enough away.
+// Google refuses a departure time in the past for car trips, and a weekday morning is when the school run happens.
+function nextWeekdayAt(now: Date, minutesOfDay: number, aheadMinutes = 15): Date {
+  const earliest = now.getTime() + aheadMinutes * 60 * 1000;
   const ist = new Date(now.getTime() + IST_OFFSET_MS);
   for (let add = 0; add < 8; add++) {
     const day = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() + add));
     const weekday = day.getUTCDay(); // the India date's day of the week
     if (weekday === 0 || weekday === 6) continue;
-    const at = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), 7, 30) - IST_OFFSET_MS;
+    const at = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), 0, minutesOfDay) - IST_OFFSET_MS;
     if (at >= earliest) return new Date(at);
   }
   throw new Error("no weekday found"); // cannot happen: a week always has a weekday
+}
+
+const schoolRunDeparture = (now: Date): Date => nextWeekdayAt(now, 7 * 60 + 30);
+
+// "08:15:00" (or "08:15") as minutes after midnight, or null if it is not a time.
+function startMinutes(value: unknown): number | null {
+  const m = /^([01][0-9]|2[0-3]):([0-5][0-9])(:[0-5][0-9])?$/.exec(String(value ?? "").trim());
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+const hhmm = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+
+// For "arrive": the schools on the screen, gathered by the time their day starts, commonest first, at most four
+// groups (each group costs one Google lookup). Schools in the groups left over get no time rather than a wrong one.
+function startGroups(schools: any[], max = MAX_START_GROUPS): { minutes: number; assumed: boolean; schools: any[] }[] {
+  const byStart = new Map<number, { minutes: number; assumed: boolean; schools: any[] }>();
+  for (const s of schools) {
+    const own = startMinutes(s?.start_time);
+    const minutes = own ?? DEFAULT_START_MINUTES;
+    const key = own === null ? -1 : minutes;          // "not told" is its own group, even at 8:00
+    if (!byStart.has(key)) byStart.set(key, { minutes, assumed: own === null, schools: [] });
+    byStart.get(key)!.schools.push(s);
+  }
+  return [...byStart.values()].sort((a, b) => b.schools.length - a.schools.length || a.minutes - b.minutes).slice(0, max);
 }
 
 // Google writes durations as "712s" (sometimes with decimals).
@@ -164,7 +193,7 @@ function createHandler(deps: Deps) {
       const detail = (d: string) => (isAdmin ? { detail: d.slice(0, 500) } : {});
 
       // The schools as this parent may see them: hidden places are left out by the database rules and here too.
-      const { data: rows, error: schoolErr } = await db.from("schools").select("id,latitude,longitude").in("id", parsed.ids).eq("is_hidden", false);
+      const { data: rows, error: schoolErr } = await db.from("schools").select("id,latitude,longitude,start_time").in("id", parsed.ids).eq("is_hidden", false);
       if (schoolErr) return json({ ok: false, code: "failed", ...detail(schoolErr.message) }, 500);
       const byId = new Map((rows ?? []).map((r: any) => [String(r.id).toLowerCase(), r]));
       const dests = parsed.ids.map((id) => byId.get(id)).filter(hasCoords) as any[];
@@ -173,8 +202,18 @@ function createHandler(deps: Deps) {
       const key = deps.env.get("GOOGLE_MAPS_API_KEY") ?? "";
       if (!key) return json({ ok: false, code: "not_configured", ...detail("The GOOGLE_MAPS_API_KEY secret is missing in Supabase.") });
 
+      // One trip to Google for "now" and "school_run"; for "arrive", one per start time on the screen.
+      const groups = parsed.when === "arrive"
+        ? startGroups(dests).map((g) => {
+            const arrive = nextWeekdayAt(deps.now(), g.minutes, LEAVE_EARLY_MINUTES + 15);
+            return { ...g, arrive, departure: new Date(arrive.getTime() - LEAVE_EARLY_MINUTES * 60 * 1000) };
+          })
+        : [{ minutes: 0, assumed: false, schools: dests, arrive: null as Date | null,
+             departure: parsed.when === "school_run" ? schoolRunDeparture(deps.now()) : null }];
+      const elementCount = groups.reduce((n, g) => n + g.schools.length, 0);
+
       // Take the allowance BEFORE calling Google, so a burst of requests cannot slip past the limits.
-      const quota = await db.rpc("take_commute_quota", { p_elements: dests.length });
+      const quota = await db.rpc("take_commute_quota", { p_elements: elementCount });
       if (quota.error) {
         const msg = String(quota.error.message ?? "");
         const missing = /take_commute_quota|schema cache|PGRST202|does not exist/i.test(msg) || quota.error.code === "PGRST202";
@@ -182,40 +221,65 @@ function createHandler(deps: Deps) {
       }
       if (!quota.data?.ok) return json({ ok: false, code: quota.data?.reason ?? "failed", ...(quota.data?.limit ? { limit: quota.data.limit } : {}) });
 
-      const departure = parsed.when === "school_run" ? schoolRunDeparture(deps.now()) : null;
-      const googleBody = {
-        origins: [{ waypoint: { location: { latLng: { latitude: parsed.lat, longitude: parsed.lng } } } }],
-        destinations: dests.map((d) => ({ waypoint: { location: { latLng: { latitude: Number(d.latitude), longitude: Number(d.longitude) } } } })),
-        travelMode: "DRIVE",
-        routingPreference: "TRAFFIC_AWARE",
-        ...(departure ? { departureTime: departure.toISOString() } : {}),
+      const askGoogle = async (group: typeof groups[number]) => {
+        const googleBody = {
+          origins: [{ waypoint: { location: { latLng: { latitude: parsed.lat, longitude: parsed.lng } } } }],
+          destinations: group.schools.map((d) => ({ waypoint: { location: { latLng: { latitude: Number(d.latitude), longitude: Number(d.longitude) } } } })),
+          travelMode: "DRIVE",
+          routingPreference: "TRAFFIC_AWARE",
+          ...(group.departure ? { departureTime: group.departure.toISOString() } : {}),
+        };
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), GOOGLE_TIMEOUT_MS);
+        try {
+          const res = await deps.fetch(ROUTES_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Goog-Api-Key": key, "X-Goog-FieldMask": FIELD_MASK },
+            body: JSON.stringify(googleBody),
+            signal: ctrl.signal,
+          });
+          const text = await res.text();
+          if (!res.ok) return { problem: googleProblem(res.status, text), text };
+          try { return { elements: JSON.parse(text) }; } catch { return { problem: "google_error", text }; }
+        } catch (e) {
+          return { problem: (e as any)?.name === "AbortError" ? "google_timeout" : "google_error", text: "" };
+        } finally {
+          clearTimeout(timer);
+        }
       };
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), GOOGLE_TIMEOUT_MS);
-      let res: Response;
-      try {
-        res = await deps.fetch(ROUTES_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Goog-Api-Key": key, "X-Goog-FieldMask": FIELD_MASK },
-          body: JSON.stringify(googleBody),
-          signal: ctrl.signal,
-        });
-      } catch (e) {
-        return json({ ok: false, code: (e as any)?.name === "AbortError" ? "google_timeout" : "google_error" });
-      } finally {
-        clearTimeout(timer);
-      }
-      const text = await res.text();
-      if (!res.ok) return json({ ok: false, code: googleProblem(res.status, text), ...detail(text) });
-      let elements: unknown;
-      try { elements = JSON.parse(text); } catch { return json({ ok: false, code: "google_error", ...detail(text) }); }
 
-      const ids = dests.map((d) => String(d.id).toLowerCase());
+      const answers = await Promise.all(groups.map(askGoogle));
+      const firstProblem = answers.find((a) => (a as any).problem) as any;
+      if (firstProblem && answers.every((a) => (a as any).problem)) {
+        return json({ ok: false, code: firstProblem.problem, ...detail(firstProblem.text ?? "") });
+      }
+
+      const times: Record<string, any> = {};
+      groups.forEach((group, i) => {
+        const answer = answers[i] as any;
+        const ids = group.schools.map((d) => String(d.id).toLowerCase());
+        const got = answer.elements ? readMatrix(answer.elements, ids) : Object.fromEntries(ids.map((id) => [id, null]));
+        for (const id of ids) {
+          const t = got[id];
+          if (t && group.arrive) {
+            times[id] = {
+              ...t,
+              startTime: hhmm(group.minutes),
+              assumedStart: group.assumed,
+              leaveBy: new Date(group.arrive.getTime() - t.minutes * 60 * 1000).toISOString(),
+              arriveBy: group.arrive.toISOString(),
+            };
+          } else {
+            times[id] = t;
+          }
+        }
+      });
+
       return json({
         ok: true,
         when: parsed.when,
-        departure: departure ? departure.toISOString() : null,
-        times: readMatrix(elements, ids),
+        departure: groups[0].departure ? groups[0].departure.toISOString() : null,
+        times,
         lookupsLeft: quota.data.lookups_left ?? null,
       });
     } catch (_err) {

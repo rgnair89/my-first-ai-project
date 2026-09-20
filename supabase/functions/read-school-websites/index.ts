@@ -638,6 +638,9 @@ type Deps = {
   fetch: typeof fetch;
   createClient: (url: string, key: string, options?: any) => any;
   now: () => Date;
+  // Looks a host name up in the real internet, so a public name that quietly points at a private machine is refused
+  // as well as an address that says 10.0.0.1 outright. Left out in tests.
+  resolve?: (host: string) => Promise<string[]>;
 };
 type Page = { url: string; status: number; note?: string; html?: string };
 
@@ -658,9 +661,41 @@ async function readLimited(res: Response, max: number): Promise<string | null> {
   return new TextDecoder("utf-8", { fatal: false }).decode(all);
 }
 
+// An address on the open internet, rather than inside this machine, this network, or a cloud provider's own service.
+function publicAddress(ip: string): boolean {
+  const s = String(ip ?? "").trim().toLowerCase();
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(s)) return !privateIPv4(s);
+  if (!s.includes(":")) return false;                    // not an address we understand
+  if (s.startsWith("::ffff:")) return publicAddress(s.slice(7));
+  if (s === "::1" || s === "::") return false;
+  return !/^(f[cd]|fe[89ab])/.test(s);                   // unique local and link local
+}
+
+// Host names already looked up: a site's pages share one lookup.
+const resolvedHosts = new Map<string, boolean>();
+
+async function hostIsPublic(deps: Deps, host: string): Promise<boolean> {
+  if (!deps.resolve) return true;
+  const known = resolvedHosts.get(host);
+  if (known !== undefined) return known;
+  let ok = false;
+  try {
+    const addresses = await deps.resolve(host);
+    ok = addresses.length > 0 && addresses.every(publicAddress);
+  } catch {
+    ok = false;
+  }
+  if (resolvedHosts.size > 500) resolvedHosts.clear();
+  resolvedHosts.set(host, ok);
+  return ok;
+}
+
 async function fetchPage(deps: Deps, start: URL, timeoutMs = PAGE_TIMEOUT_MS, accept = "text/html,application/xhtml+xml"): Promise<Page> {
   let url = start;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    if (!(await hostIsPublic(deps, url.hostname.toLowerCase()))) {
+      return { url: url.href, status: 0, note: "the address points inside a private network" };
+    }
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     let res: Response;
@@ -765,6 +800,7 @@ function createHandler(deps: Deps) {
   return async (req: Request): Promise<Response> => {
     if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
     if (req.method !== "POST") return json({ ok: false, code: "bad_request" }, 405);
+    resolvedHosts.clear();   // one lookup per host per run, and never a stale answer from an earlier run
     const started = deps.now().getTime();
     try {
       let body: any = {};
@@ -841,4 +877,16 @@ function createHandler(deps: Deps) {
 
 // ==== END testable logic ====
 
-Deno.serve(createHandler({ env: Deno.env, fetch, createClient, now: () => new Date() }));
+Deno.serve(createHandler({
+  env: Deno.env,
+  fetch,
+  createClient,
+  now: () => new Date(),
+  resolve: async (host: string) => {
+    const out: string[] = [];
+    for (const kind of ["A", "AAAA"] as const) {
+      try { out.push(...(await Deno.resolveDns(host, kind))); } catch { /* the other kind may still answer */ }
+    }
+    return out;
+  },
+}));
