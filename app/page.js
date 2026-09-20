@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/utils/supabase';
 import SweepPanel from './SweepPanel';
 import ReviewsPanel from './ReviewsPanel';
@@ -9,13 +9,18 @@ import DriveTimesPanel from './DriveTimesPanel';
 import SiteDataPanel from './SiteDataPanel';
 import CategoriesPanel from './CategoriesPanel';
 import SchoolProfilePanel from './SchoolProfilePanel';
+import ApplicationsPanel from './ApplicationsPanel';
+import SecurityPanel from './SecurityPanel';
 import { loadPendingCount } from './reviews-admin';
 import { loadOpenCount } from './enquiries-admin';
+import { loadMySchools } from './profiles-admin';
+import { needsSecondStep, loadFactors, signInStep, friendlyError as securityError, cleanCode } from './security-admin';
 
 export default function RootRouting() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
-  
+  const [step, setStep] = useState({ checked: false, needed: false, factorId: null, level: null });
+
   // Auth Form State
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
@@ -25,24 +30,28 @@ export default function RootRouting() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
-  async function fetchProfile(userId) {
-    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
-    setProfile(data);
-  }
+  const afterSignIn = useCallback((s) => {
+    if (!s) { setProfile(null); setStep({ checked: false, needed: false, factorId: null, level: null }); return Promise.resolve(); }
+    return Promise.all([
+      supabase.from('profiles').select('*').eq('id', s.user.id).single(),
+      needsSecondStep(supabase.auth),
+      loadFactors(supabase.auth),
+    ]).then(([p, need, factors]) => {
+      setProfile(p.data);
+      setStep({
+        checked: true,
+        needed: !!need.needed,
+        level: need.level ?? null,
+        factorId: factors.factors.find((f) => f.status === 'verified')?.id ?? null,
+      });
+    });
+  }, []);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session) fetchProfile(session.user.id);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (session) fetchProfile(session.user.id);
-    });
-
+    supabase.auth.getSession().then(({ data: { session: s } }) => { setSession(s); return afterSignIn(s); });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => { setSession(s); afterSignIn(s); });
     return () => subscription.unsubscribe();
-  }, []);
+  }, [afterSignIn]);
 
   async function handleAuth(e) {
     e.preventDefault();
@@ -74,26 +83,19 @@ export default function RootRouting() {
     setLoading(false);
   }
 
-  async function handleOAuthLogin(provider) {
-    await supabase.auth.signInWithOAuth({
-      provider: provider,
-      options: { redirectTo: window.location.origin }
-    });
-  }
-
   if (!session) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
         <div className="bg-white text-gray-900 p-8 rounded-xl shadow-sm border border-gray-200 w-full max-w-md">
           <h1 className="text-3xl font-black text-gray-900 mb-6 text-center">Kidscover</h1>
-          
+
           <form onSubmit={handleAuth} className="mb-6">
             {isSignUp && (
               <div className="flex gap-4 mb-4">
                 <div className="flex-1">
                   <label className="block text-xs font-bold text-gray-500 mb-2">FIRST NAME</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={firstName}
                     onChange={(e) => setFirstName(e.target.value)}
                     className="w-full border border-gray-300 rounded-lg p-3 text-black"
@@ -102,8 +104,8 @@ export default function RootRouting() {
                 </div>
                 <div className="flex-1">
                   <label className="block text-xs font-bold text-gray-500 mb-2">LAST NAME</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={lastName}
                     onChange={(e) => setLastName(e.target.value)}
                     className="w-full border border-gray-300 rounded-lg p-3 text-black"
@@ -114,8 +116,8 @@ export default function RootRouting() {
             )}
 
             <label className="block text-xs font-bold text-gray-500 mb-2">EMAIL ADDRESS</label>
-            <input 
-              type="email" 
+            <input
+              type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full border border-gray-300 rounded-lg p-3 mb-4 text-black"
@@ -123,24 +125,24 @@ export default function RootRouting() {
             />
 
             <label className="block text-xs font-bold text-gray-500 mb-2">PASSWORD</label>
-            <input 
-              type="password" 
+            <input
+              type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full border border-gray-300 rounded-lg p-3 mb-6 text-black"
               required
             />
 
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               disabled={loading}
               className="w-full bg-blue-600 text-white font-bold p-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 mb-4"
             >
               {loading ? 'Processing...' : (isSignUp ? 'Create Account' : 'Log In')}
             </button>
 
-            <button 
-              type="button" 
+            <button
+              type="button"
               onClick={() => {
                 setIsSignUp(!isSignUp);
                 setMessage('');
@@ -152,31 +154,71 @@ export default function RootRouting() {
           </form>
 
           {message && <p className={`text-sm text-center font-bold mb-6 ${message.includes('successful') ? 'text-green-600' : 'text-red-600'}`}>{message}</p>}
-
-          <div className="flex items-center mb-6">
-            <div className="flex-1 border-t border-gray-200"></div>
-            <span className="px-4 text-xs font-bold text-gray-400">OR</span>
-            <div className="flex-1 border-t border-gray-200"></div>
-          </div>
-
-          <button 
-            onClick={() => handleOAuthLogin('google')}
-            className="w-full border border-gray-300 text-gray-700 font-bold p-3 rounded-lg hover:bg-gray-50 flex justify-center items-center gap-2"
-          >
-            Continue with Google
-          </button>
         </div>
       </div>
     );
   }
 
-  if (profile?.role === 'admin') return <AdminWebDashboard profile={profile} />;
-  if (profile?.role === 'school_admin') return <SchoolStaffDashboard profile={profile} userId={session.user.id} />;
+  if (step.needed) return <SecondStep factorId={step.factorId} onDone={() => afterSignIn(session)} />;
+
+  if (profile?.role === 'admin') return <AdminWebDashboard profile={profile} level={step.level} />;
+  if (profile?.role === 'school_admin') return <SchoolStaffDashboard profile={profile} userId={session.user.id} level={step.level} />;
   return <ParentWebDashboard profile={profile} />;
 }
 
-// A school's own staff: they edit their school's page (photo, facilities, achievements) and nothing else.
-function SchoolStaffDashboard({ profile, userId }) {
+// The code from an authenticator app, asked for once per sign-in when the account has two-step sign-in set up.
+function SecondStep({ factorId, onDone }) {
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function verify(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    const res = await signInStep(supabase.auth, factorId, code);
+    setBusy(false);
+    if (res.error) { setError(securityError(res.error)); return; }
+    onDone();
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <form onSubmit={verify} className="bg-white text-gray-900 p-8 rounded-xl shadow-sm border border-gray-200 w-full max-w-sm" data-testid="second-step">
+        <h1 className="text-xl font-black mb-2">One more step</h1>
+        <p className="text-sm text-gray-600 mb-4">Open your authenticator app and type the 6-digit code for Kidscover.</p>
+        <input data-testid="second-step-code" value={code} onChange={(e) => setCode(cleanCode(e.target.value))} inputMode="numeric"
+          placeholder="123456" className="w-full border border-gray-300 rounded-lg p-3 text-black text-center tracking-widest text-lg" />
+        {error && <p data-testid="second-step-error" className="text-sm font-bold text-red-600 mt-3">{error}</p>}
+        <button type="submit" data-testid="second-step-go" disabled={busy} className="w-full bg-blue-600 text-white font-bold p-3 rounded-lg mt-4 disabled:opacity-50">
+          {busy ? 'Checking...' : 'Continue'}
+        </button>
+        <button type="button" onClick={() => supabase.auth.signOut()} className="w-full text-sm text-gray-500 font-bold mt-3 hover:underline">Sign out</button>
+      </form>
+    </div>
+  );
+}
+
+function Tabs({ tabs, active, onPick }) {
+  return (
+    <div className="flex flex-wrap gap-3 mb-6">
+      {tabs.map((t) => (
+        <button key={t.key} data-testid={`tab-${t.key}`} onClick={() => onPick(t.key)}
+          className={`px-4 py-2 rounded-lg font-bold text-sm ${active === t.key ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}>
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// A school's own staff: their school's page, their enquiries, their applications, and their own sign-in security.
+function SchoolStaffDashboard({ profile, userId, level }) {
+  const [tab, setTab] = useState('school');
+  const [schoolIds, setSchoolIds] = useState(null);
+
+  useEffect(() => { loadMySchools(supabase, userId).then((r) => setSchoolIds((r.schools ?? []).map((s) => s.id))); }, [userId]);
+
   return (
     <div className="p-8 max-w-6xl mx-auto">
       <div className="flex justify-between items-center mb-8">
@@ -186,7 +228,20 @@ function SchoolStaffDashboard({ profile, userId }) {
         </div>
         <button onClick={() => supabase.auth.signOut()} className="text-gray-500 font-bold hover:text-black">Sign Out</button>
       </div>
-      <SchoolProfilePanel mode="staff" userId={userId} />
+      <Tabs
+        tabs={[
+          { key: 'school', label: 'Your school page' },
+          { key: 'enquiries', label: 'Enquiries' },
+          { key: 'applications', label: 'Applications' },
+          { key: 'security', label: 'Security' },
+        ]}
+        active={tab}
+        onPick={setTab}
+      />
+      {tab === 'school' && <SchoolProfilePanel mode="staff" userId={userId} />}
+      {tab === 'enquiries' && <EnquiriesPanel mode="staff" />}
+      {tab === 'applications' && <ApplicationsPanel mode="staff" schoolIds={schoolIds} />}
+      {tab === 'security' && <SecurityPanel level={level} />}
     </div>
   );
 }
@@ -203,34 +258,24 @@ function ParentWebDashboard({ profile }) {
           Welcome, {profile?.first_name} {profile?.last_name} | {profile?.email} (Verified)
         </span>
       </div>
+      <p className="text-sm text-gray-600 mt-4">Kidscover for parents is the phone app. This page is for schools and Kidscover staff.</p>
     </div>
   );
 }
 
-function AdminWebDashboard({ profile }) {
-  const [activeSubTab, setActiveSubTab] = useState('applications'); // 'applications' | 'enquiries' | 'reviews' | 'schooldata' | 'categories' | 'profiles'
-  const [applications, setApplications] = useState([]);
+function AdminWebDashboard({ profile, level }) {
+  const [activeSubTab, setActiveSubTab] = useState('applications');
   const [openEnquiries, setOpenEnquiries] = useState(0);
   const [pendingReviews, setPendingReviews] = useState(0);
 
-  useEffect(() => {
-    fetchApplications();
-    fetchOpenEnquiries();
-    fetchPendingReviews();
+  const counts = useCallback(() => {
+    loadPendingCount(supabase).then(setPendingReviews);
+    loadOpenCount(supabase).then(setOpenEnquiries);
   }, []);
-
-  async function fetchPendingReviews() {
-    setPendingReviews(await loadPendingCount(supabase));
-  }
-
-  async function fetchOpenEnquiries() {
-    setOpenEnquiries(await loadOpenCount(supabase));
-  }
-
-  async function fetchApplications() {
-    const { data } = await supabase.from('applications').select('*, schools(name)').order('created_at', { ascending: false });
-    setApplications(data || []);
-  }
+  useEffect(() => {
+    loadPendingCount(supabase).then(setPendingReviews);
+    loadOpenCount(supabase).then(setOpenEnquiries);
+  }, []);
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
@@ -247,76 +292,27 @@ function AdminWebDashboard({ profile }) {
       <SweepPanel />
       <DriveTimesPanel />
 
-      <div className="flex gap-4 mb-6">
-        <button
-          onClick={() => setActiveSubTab('applications')}
-          className={`px-4 py-2 rounded-lg font-bold text-sm ${activeSubTab === 'applications' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
-        >
-          Admissions Pipeline ({applications.length})
-        </button>
-        <button
-          onClick={() => setActiveSubTab('enquiries')}
-          className={`px-4 py-2 rounded-lg font-bold text-sm ${activeSubTab === 'enquiries' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
-        >
-          Admissions Enquiries ({openEnquiries} need a reply)
-        </button>
-        <button
-          onClick={() => setActiveSubTab('reviews')}
-          className={`px-4 py-2 rounded-lg font-bold text-sm ${activeSubTab === 'reviews' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
-        >
-          Parent Reviews ({pendingReviews} waiting)
-        </button>
-        <button
-          onClick={() => setActiveSubTab('schooldata')}
-          className={`px-4 py-2 rounded-lg font-bold text-sm ${activeSubTab === 'schooldata' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
-        >
-          School Data
-        </button>
-        <button
-          onClick={() => setActiveSubTab('categories')}
-          className={`px-4 py-2 rounded-lg font-bold text-sm ${activeSubTab === 'categories' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
-        >
-          Categories
-        </button>
-        <button
-          onClick={() => setActiveSubTab('profiles')}
-          className={`px-4 py-2 rounded-lg font-bold text-sm ${activeSubTab === 'profiles' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
-        >
-          School Profiles
-        </button>
-      </div>
+      <Tabs
+        tabs={[
+          { key: 'applications', label: 'Admission applications' },
+          { key: 'enquiries', label: `Enquiries (${openEnquiries} need a reply)` },
+          { key: 'reviews', label: `Parent reviews (${pendingReviews} waiting)` },
+          { key: 'schooldata', label: 'School data' },
+          { key: 'categories', label: 'Categories' },
+          { key: 'profiles', label: 'School profiles' },
+          { key: 'security', label: 'Security' },
+        ]}
+        active={activeSubTab}
+        onPick={setActiveSubTab}
+      />
 
-      {activeSubTab === 'profiles' ? (
-        <SchoolProfilePanel mode="admin" />
-      ) : activeSubTab === 'categories' ? (
-        <CategoriesPanel />
-      ) : activeSubTab === 'schooldata' ? (
-        <SiteDataPanel />
-      ) : activeSubTab === 'reviews' ? (
-        <ReviewsPanel onChanged={fetchPendingReviews} />
-      ) : activeSubTab === 'applications' ? (
-        <div className="bg-white text-gray-900 border border-gray-200 rounded-xl shadow-sm overflow-hidden p-6">
-          <h2 className="text-lg font-bold text-gray-900 mb-4">Submitted Applications</h2>
-          {applications.length === 0 ? (
-            <p className="text-gray-500 italic text-sm">No applications found in pipeline.</p>
-          ) : (
-            <div className="space-y-4">
-              {applications.map((app) => (
-                <div key={app.id} className="border border-gray-100 bg-gray-50 p-4 rounded-lg flex justify-between items-center">
-                  <div>
-                    <span className="text-xs font-bold text-amber-700 uppercase bg-amber-100 px-2 py-0.5 rounded">{app.status}</span>
-                    <h3 className="font-bold text-gray-900 mt-1">{app.schools?.name}</h3>
-                    <p className="text-xs text-gray-600">Applicant: {app.ward_first_name} {app.ward_last_name} | Grade: {app.grade_applied_for}</p>
-                  </div>
-                  <span className="text-xs text-gray-400">{new Date(app.created_at).toLocaleDateString()}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      ) : (
-        <EnquiriesPanel onChanged={fetchOpenEnquiries} />
-      )}
+      {activeSubTab === 'applications' && <ApplicationsPanel mode="admin" />}
+      {activeSubTab === 'enquiries' && <EnquiriesPanel onChanged={counts} />}
+      {activeSubTab === 'reviews' && <ReviewsPanel onChanged={counts} />}
+      {activeSubTab === 'schooldata' && <SiteDataPanel />}
+      {activeSubTab === 'categories' && <CategoriesPanel />}
+      {activeSubTab === 'profiles' && <SchoolProfilePanel mode="admin" />}
+      {activeSubTab === 'security' && <SecurityPanel isAdmin level={level} />}
     </div>
   );
 }

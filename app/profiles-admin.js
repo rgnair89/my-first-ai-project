@@ -2,6 +2,8 @@
 // each school's own staff. No React here, so it can be tested on its own. Every function that talks to the database
 // takes the client as an argument; Wikimedia searches take a fetch function.
 
+import { describeFeeChange } from './fees-admin';
+
 export const FACILITIES = [
   { key: 'cafeteria', label: 'Cafeteria / canteen' },
   { key: 'outdoor_playground', label: 'Open playground' },
@@ -47,7 +49,7 @@ export const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 export const PHOTO_MAX_BYTES = 5 * 1024 * 1024;
 export const PROFILE_SCHOOL_COLUMNS = 'id, name, address, website, is_hidden, category, photo_url, photo_source, photo_credit, photo_licence, photo_page_url';
 // Read on their own, so the rest of the page still works before 20260919001400 is run.
-export const LEVEL_COLUMNS = 'levels, profile_levels, profile_levels_source';
+export const LEVEL_COLUMNS = 'levels, profile_levels, profile_levels_source, start_time, start_time_source';
 
 export const cleanSearch = (text) => String(text ?? '').replace(/[,()*"\\%]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
 const stripHtml = (s) => String(s ?? '').replace(/<[^>]*>/g, ' ').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
@@ -58,6 +60,8 @@ export function friendlyError(error) {
     return /only a kidscover admin/i.test(msg) ? msg : 'You can only change your own school.';
   }
   if (/profile_levels|set_school_levels|20260919001400/i.test(msg)) return 'Run the 20260919001400_hand_set_levels.sql migration first.';
+  if (/school_fee_schedules|set_school_fees|set_school_start_time|start_time|20260920000200/i.test(msg)) return 'Run the 20260920000200_fees_and_start_times.sql migration first.';
+  if (/school_crm_webhooks|crm_deliveries|outbound_click|admission_application|20260920000300/i.test(msg)) return 'Run the 20260920000300_partner_schools.sql migration first.';
   if (/school_facilities|school_achievements|school_change_log|school_staff|set_school_|save_school_achievement|photo_url|schema cache|20260919001200/i.test(msg)) {
     return 'Run the 20260919001200_school_profiles.sql migration first.';
   }
@@ -81,6 +85,7 @@ export async function loadProfile(db, schoolId) {
   return {
     school: s.data, facilities: f.data ?? [], achievements: a.data ?? [],
     levels: l.error ? null : { now: l.data?.levels ?? [], hand: l.data?.profile_levels ?? null, source: l.data?.profile_levels_source ?? null },
+    start: l.error ? null : { start_time: l.data?.start_time ?? null, start_time_source: l.data?.start_time_source ?? null },
     levelsError: l.error ? friendlyError(l.error) : '', error: null,
   };
 }
@@ -272,6 +277,7 @@ export function describeChange(c) {
   }
   if (c.what === 'photo') return c.action === 'removed' ? 'Photo removed' : `Photo ${verb} (${c.after?.source === 'wikimedia' ? 'Wikimedia Commons' : 'uploaded by the school'})`;
   if (c.what === 'staff') return `Staff member ${verb}`;
+  if (c.what === 'fees' || c.what === 'start_time') return describeFeeChange(c);
   if (c.what === 'levels') {
     if (c.action === 'removed') return `Levels back to automatic (were set to ${levelsText(c.before?.levels)})`;
     if (c.action === 'changed') return `Levels changed: ${levelsText(c.before?.levels)} \u2192 ${levelsText(c.after?.levels)}`;

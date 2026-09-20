@@ -1,8 +1,8 @@
 # Product Requirements Document (PRD): Kidscover — Feature & User Story Breakdown
 
 **Author:** Rajasekharan Gopakumar
-**Document Status:** v1.1 — MVP built; each story marked Built, Partly built or Planned
-**Last Updated:** 20 September 2026
+**Document Status:** v1.2 — MVP and the second phase built; each story marked Built, Partly built or Planned
+**Last Updated:** 20 September 2026 (second phase)
 
 ---
 
@@ -119,3 +119,38 @@
 
 - **US9.1 (Kidscover Admin):** As an admin, I want to see which places the rules put in After-school classes, Colleges or Hidden (with the reason), and move any single place with one click.
 - **US9.2 (Parent):** As a parent, I want After-school classes and Colleges as separate lists, one tap away, with filters that make sense for each.
+
+---
+
+## Feature 10: Fees and the True Cost of a Year — Built
+
+- **US10.1 (Parent) — Built:** As a parent, I want to see what a year at a school really costs — everything in the first year, and every year after — so that I can compare schools honestly.
+- **US10.2 (Parent) — Built:** As a parent, I want the breakdown (tuition, bus, meals, uniform, activities, one-time fees) and to know where the numbers came from.
+- **US10.3 (Parent) — Built:** As a parent, I want to filter by what my family can spend and sort by lowest cost, and to decide whether schools with no fees listed are shown.
+- **US10.4 (School Admin) — Built:** As a school's staff member, I want to give our fees per level and year, with a note for things like a sibling discount.
+
+## Feature 11: The Kidscover Standard Admission Form — Built
+
+- **US11.1 (Parent) — Built:** As a parent, I want to apply to a school with one form, agreeing in as many words to share my child's details with that school alone.
+- **US11.2 (Parent) — Built:** As a parent, I want to follow what happens to my application, and to withdraw or delete it whenever I choose.
+- **US11.3 (School Admin) — Built:** As a school, I want the applications sent to us, with the child's details and how to reach the family, and to move each one through our stages with a line back to them.
+- **US11.4 (Backend) — Built:** As a system, I need each application delivered to a partner school's own system over https, signed with that school's secret, retried on failure, and never sent to an address inside a private network.
+- **US11.5 (School Admin) — Built:** As a school, I want to see how many families went on to our own website or admissions page from Kidscover, without being told who they were.
+
+## Feature 12: Notifications — Built
+
+- **US12.1 (Parent) — Built:** As a parent, I want my phone to tell me when a school replies or my application moves on, in my own language, without putting anything private on my lock screen.
+- **US12.2 (Parent) — Built:** As a parent, I want to switch notifications off.
+
+## Feature 13: The App in My Own Language — Built
+
+- **US13.1 (Parent) — Built:** As a parent, I want to read Kidscover in my own language — any of the 22 languages of the Eighth Schedule, English, or eight international ones — and to choose it before I even sign in.
+- **US13.2 (Parent) — Built:** As a parent reading Arabic or Urdu, I want the screen laid out right to left.
+- **US13.3 (Parent) — Built:** As a parent, I want my choice remembered with my account, so a new phone speaks my language too.
+
+## Feature 14: Security and My Own Data — Built
+
+- **US14.1 (Parent) — Built:** As a parent, I want to unlock Kidscover with my fingerprint instead of typing my password, and for my sign-in to be locked in the phone's own keystore.
+- **US14.2 (Parent) — Built:** As a parent, I want to delete my account and everything in it, after proving it is me.
+- **US14.3 (Kidscover Admin) — Built:** As an admin, I want two-step sign-in for the portal, and to require it for everyone who works on families' details.
+- **US14.4 (Backend) — Built:** As a system, I need every right nobody uses taken away from the database roles, so a table added tomorrow is not open by default.

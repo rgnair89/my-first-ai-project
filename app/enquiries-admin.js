@@ -13,7 +13,7 @@ export const THREAD_SELECT =
   'subject, grade_of_interest, start_year, status, created_at, last_message_at, ' +
   'message_count, last_message, unread_for_staff';
 
-export const MESSAGE_SELECT = 'id, sender_id, message, created_at';
+export const MESSAGE_SELECT = 'id, sender_id, sender_role, message, created_at';
 export const MAX_REPLY = 4000;
 export const MIN_REPLY = 2;
 
@@ -86,13 +86,13 @@ export function checkReply(text) {
   return { body };
 }
 
-// Who wrote a message. The parent's id is on the thread, so staff names are never shown to anyone.
-export const isFromParent = (message, thread) => message.sender_id === thread.parentId;
-export const senderLabel = (message, thread) => (isFromParent(message, thread) ? 'Parent' : 'Kidscover');
+// Who wrote a message. Each message records the side it came from, so nobody's name is ever shown.
+export const isFromParent = (message, thread) => message.sender_role === 'parent' || (!message.sender_role && message.sender_id === thread.parentId);
+export const senderLabel = (message, thread) => (isFromParent(message, thread) ? 'Parent' : message.sender_role === 'school' ? 'The school' : 'Kidscover');
 
 export function friendlyError(error) {
   const msg = String(error?.message ?? error ?? '');
-  if (/row-level security|permission denied|not yours/i.test(msg)) return 'You do not have permission to do that. Check that your account is an admin.';
+  if (/row-level security|permission denied|not yours/i.test(msg)) return 'You can only work on enquiries sent to your own school.';
   if (/network|fetch/i.test(msg)) return 'Could not reach the database. Check your connection and try again.';
   if (/schema cache|does not exist|PGRST202/i.test(msg)) return 'Enquiries are not switched on in the database yet. Run the 20260919000600 migration in the SQL editor.';
   return msg || 'Something went wrong. Please try again.';
@@ -122,3 +122,9 @@ export async function sendReply(db, ticketId, text) {
 
 export const setStatus = (db, ticketId, status) => db.rpc('set_ticket_status', { p_ticket: ticketId, p_status: status });
 export const markRead = (db, ticketId) => db.rpc('mark_ticket_read', { p_ticket: ticketId });
+
+// Asks the push sender to run now, so the family's phone buzzes while they are still thinking about this school.
+// A problem here never stops the reply: the notification is in the app either way.
+export async function nudgePush(db) {
+  try { await db.functions.invoke('send-push', { body: {} }); } catch { /* it will go out with the next run */ }
+}

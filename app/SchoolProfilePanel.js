@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/utils/supabase';
+import { FeesSection, SchoolDaySection, CrmSection, ClicksSection } from './SchoolProfileExtras';
 import {
   FACILITIES, ACHIEVEMENT_KINDS, SOURCE_LABELS, LEVEL_NAMES, LEVEL_ORDER, kindLabel, levelsText, levelsSourceText, setLevels,
   friendlyError, loadProfile, findSchools, loadMySchools,
@@ -184,6 +185,12 @@ export default function SchoolProfilePanel({ mode = 'admin', userId = null }) {
               </>
             )}
           </section>
+
+          {/* ---- fees, the school day, and (for admins) the school's own system ---- */}
+          <FeesSection school={school} busy={busy} act={act} version={changes.length} />
+          <SchoolDaySection key={profile.start?.start_time ?? "none"} school={school} start={profile.start} busy={busy} act={act} />
+          <ClicksSection school={school} />
+          {isAdmin && <CrmSection school={school} busy={busy} act={act} />}
 
           {/* ---- photo ---- */}
           <section className="mb-6">

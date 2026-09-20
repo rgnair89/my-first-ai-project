@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/utils/supabase';
 import {
-  VIEWS, loadThreads, loadMessages, sendReply, setStatus, markRead,
+  VIEWS, loadThreads, loadMessages, sendReply, setStatus, markRead, nudgePush,
   inView, sortFor, countByView, statusLabel, aboutLine, waitingDays, overdue, senderLabel, friendlyError,
 } from './enquiries-admin';
 
@@ -12,7 +12,8 @@ const when = (iso) => {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
-export default function EnquiriesPanel({ onChanged }) {
+export default function EnquiriesPanel({ onChanged, mode = 'admin' }) {
+  const isAdmin = mode === 'admin';
   const [threads, setThreads] = useState([]);
   const [view, setView] = useState('needs_reply');
   const [loading, setLoading] = useState(true);
@@ -62,6 +63,7 @@ export default function EnquiriesPanel({ onChanged }) {
     if (res.error) { setError(friendlyError(res.error)); return; }
     setReply('');
     setNotice('Sent. The parent can read it in the app.');
+    await nudgePush(supabase);
     const msgs = await loadMessages(supabase, thread.id);
     if (!msgs.error) setMessages(msgs.messages);
     await load();
@@ -92,6 +94,7 @@ export default function EnquiriesPanel({ onChanged }) {
       <p className="text-sm text-gray-600 mb-4">
         Questions parents sent from the app. Replying here shows up in the parent&apos;s app straight away. Enquiries do not
         include a child&apos;s name or date of birth &mdash; ask the family once you are talking.
+        {!isAdmin && ' Kidscover passes your reply on without giving out the family\u2019s email address.'}
       </p>
 
       <div className="flex flex-wrap gap-2 mb-4">
@@ -133,7 +136,7 @@ export default function EnquiriesPanel({ onChanged }) {
                 <p className="text-sm text-gray-800">{t.subject}</p>
                 {aboutLine(t) && <p className="text-xs text-gray-600 mt-0.5">{aboutLine(t)}</p>}
                 <p className="text-xs text-gray-500 mt-1">
-                  From <span data-testid={`parent-${t.id}`} className="font-semibold">{t.parentName}{t.parentEmail ? ` (${t.parentEmail})` : ''}</span>
+                  From <span data-testid={`parent-${t.id}`} className="font-semibold">{isAdmin ? `${t.parentName}${t.parentEmail ? ` (${t.parentEmail})` : ''}` : 'a family on Kidscover'}</span>
                 </p>
               </div>
               <div className="text-right text-xs text-gray-500">

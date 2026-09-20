@@ -1,9 +1,9 @@
 # Product Requirements Document (PRD): Kidscover
 
-**Document Status:** v1.1 — MVP built and live-tested; next phase planned
+**Document Status:** v1.2 — MVP live; the next phase (fees, applying, notifications, languages) built and tested
 **Author:** Rajasekharan Gopakumar
 **Target Launch:** Web & Mobile App (iOS/Android)
-**Last Updated:** 20 September 2026
+**Last Updated:** 20 September 2026 (second phase)
 
 ---
 
@@ -44,16 +44,21 @@ Status: **Built** (in the app or portal today), **Partly built**, **Planned**.
 
 | # | Feature | Status |
 |---|---|---|
-| 3.1 | Sign-in and profiles | Partly built (email + password) |
+| 3.1 | Sign-in and profiles | Built (email + password, fingerprint unlock, language, notifications, delete account) |
 | 3.2 | Location-based discovery: near me, distance, drive times | Built |
-| 3.3 | Discover list, categories and filters | Built (TCO filter planned) |
-| 3.4 | School detail page | Built (comparison planned) |
-| 3.5 | Admissions enquiries (ticketing) | Built |
+| 3.3 | Discover list, categories, filters and the cost filter | Built |
+| 3.4 | School detail page, fees breakdown and comparing four schools | Built |
+| 3.5 | Admissions enquiries, answered by Kidscover and by each school | Built |
 | 3.6 | Parent reviews and moderation | Built |
 | 3.7 | School data pipeline | Built |
 | 3.8 | School profiles, school staff and the change log | Built |
 | 3.9 | Look and feel | Built |
 | 3.10 | Partner Portal (admin web app) | Built |
+| 3.11 | Fees and the true cost of a year | Built |
+| 3.12 | The Kidscover Standard admission form, and the school's own system | Built |
+| 3.13 | Notifications on a parent's phone | Built |
+| 3.14 | 31 languages | Built (6 translated, the rest fall back to English) |
+| 3.15 | Security: two-step sign-in, tightened rights, deleting an account | Built |
 
 ### 3.1 Authentication & User Profiles (P0) — Partly built
 - **Built:** sign up and sign in with email and password; email confirmation required before writing reviews or enquiries. Roles: parent, school_admin (a school's staff), admin (Kidscover); users cannot change their own role.
@@ -172,14 +177,57 @@ Every feature ships with automated tests:
 
 ---
 
+### 3.11 Fees and the True Cost of a Year — Built
+- Each school gives its fees per level (daycare, preschool, primary, secondary) in the Partner Portal: tuition, school
+  bus, meals, uniform and books, activities, other yearly fees, and the one-time admission and registration fees. A
+  refundable deposit is shown but never counted as a cost.
+- Parents see **the first year** (everything, including the one-time fees) and **each year after that**, with the
+  breakdown underneath and where the numbers came from.
+- They can filter by what they can spend, sort by lowest cost, and choose whether to include schools whose fees
+  nobody has given yet.
+
+### 3.12 The Kidscover Standard Admission Form — Built
+- One form per child and school: the child's name, date of birth, class and year, the parent's name, phone, email and
+  address, and anything they want the school to know. The parent ticks a box naming the school before it is sent.
+- Only that parent, that school's staff and a Kidscover admin can ever read it. The family can withdraw it or delete
+  it outright at any time.
+- The school moves it through its stages (being looked at, visit arranged, a place offered, waiting list, accepted,
+  not offered) with a line back to the family; every stage is kept for the family to see.
+- **The school's own system:** a Kidscover admin can connect an https address; each application is sent there as JSON,
+  signed with that school's own secret (HMAC-SHA256), retried with a growing wait, never following a redirect and
+  never to an address inside a private network. The secret is shown once.
+- **Going out to a school's own pages** is counted (website, admissions page, fee page), so a school can see the
+  interest Kidscover sends it. Counts only: never who clicked.
+
+### 3.13 Notifications — Built
+- A parent's phone is told when a school replies to their enquiry, or moves their application along.
+- Notifications never carry the words of a message: "the school replied", never what was said.
+- Each one is sent in the parent's own language. They can switch them off in Settings.
+
+### 3.14 Languages — Built
+- 31: English, the 22 languages of the Eighth Schedule of the Constitution, and Arabic, Chinese, French, German,
+  Japanese, Portuguese, Russian and Spanish.
+- Chosen on the sign-in screen or in Settings, saved with the profile, so it follows the parent to a new phone.
+- Arabic, Urdu, Kashmiri and Sindhi lay the screen out right to left. Money and dates follow the language.
+- Text people type (reviews, achievements, addresses) is shown as written; nothing is machine-translated.
+
+### 3.15 Security — Built
+- Two-step sign-in for the Partner Portal, and a switch that requires it for every Kidscover admin and school staff
+  member.
+- Every right nobody needs was taken away from the database roles, including the ones Supabase grants by default.
+- A parent can delete their account and everything in it, after entering their password again.
+- On the phone, the sign-in is encrypted with a key in the phone's own keystore, and can be locked behind a
+  fingerprint.
+- The full review, what it found and what only the project owner can do: **SECURITY.md**.
+
 ## 8. Roadmap (next phase)
 
-1. Google, Microsoft and phone (OTP) sign-in; profile settings; push notifications.
-2. Fees and True Total Cost of Ownership, with the TCO filter and fee breakdown.
-3. Compare up to 4 schools side by side.
-4. Partner schools answer their own enquiries in the portal; the Kidscover Standard admission form and CRM webhook; outbound-click logging.
-5. Arrival-time commute (from each school's start time) and dashboard tiles.
-6. The reader in more languages (Marathi and Hindi facilities and achievements), and classes 11-12 as their own level.
+1. Google, Microsoft and phone (OTP) sign-in; a profile picture; dark mode.
+2. The remaining 25 language packs, each read by a native speaker before launch.
+3. Fees from each school's own fee page, read the way boards and facilities are read today.
+4. The app in the Play Store: a production build, a privacy policy, Google's review.
+5. The reader in more languages (Marathi and Hindi facilities and achievements), and classes 11-12 as their own level.
+6. An independent penetration test before real families use it (see SECURITY.md).
 
 ## 9. Out of Scope for Now
 
