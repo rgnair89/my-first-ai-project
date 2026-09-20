@@ -129,13 +129,22 @@ grant execute on function
 -- ---- and for whatever gets added next ------------------------------------------------------------------------------------
 -- New tables and functions are no longer handed to signed-out visitors on their own; each migration says what they may
 -- have, as the ones above do.
+--
+-- This is set for every role we are allowed to set it for. On a hosted Supabase project that is the role running this
+-- file (postgres), which is also the role that creates everything in these migrations - so anything added by a later
+-- migration is covered. supabase_admin belongs to Supabase and cannot be changed from here; the notice below says so
+-- rather than the whole migration failing over something no project owner can do.
 do $$
 declare
   r text;
 begin
   for r in select rolname from pg_roles where rolname in ('postgres', 'supabase_admin') loop
-    execute format('alter default privileges for role %I in schema public revoke insert, update, delete, truncate on tables from anon', r);
-    execute format('alter default privileges for role %I in schema public revoke execute on functions from anon', r);
+    begin
+      execute format('alter default privileges for role %I in schema public revoke insert, update, delete, truncate on tables from anon', r);
+      execute format('alter default privileges for role %I in schema public revoke execute on functions from anon', r);
+    exception when insufficient_privilege then
+      raise notice 'default privileges left alone for %: this project may not change that role. Anything that role creates by itself is not covered; everything these migrations create is.', r;
+    end;
   end loop;
 end $$;
 
