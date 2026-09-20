@@ -1,9 +1,10 @@
 # Product Requirements Document (PRD): Kidscover
 
-**Document Status:** v1.2 — MVP live; the next phase (fees, applying, notifications, languages) built and tested
+**Document Status:** v1.3 — the MVP and the second phase are both built, tested and merged; what remains is listed
+honestly in §8 and §9
 **Author:** Rajasekharan Gopakumar
 **Target Launch:** Web & Mobile App (iOS/Android)
-**Last Updated:** 20 September 2026 (second phase)
+**Last Updated:** 21 September 2026
 
 ---
 
@@ -30,24 +31,26 @@ Mumbai and Thane. The school list is built from Google Places and cleaned by rul
 - Wants facts they can trust, with the source shown, and anonymity while screening (no spam).
 
 **The School's Own Staff (school admin, secondary user)**
-- Keeps the school's page accurate: photo, facilities, achievements.
-- Receives admission enquiries (today answered by Kidscover staff on the school's behalf; see Roadmap).
+- Keeps the school's page accurate: photo, facilities, achievements, levels, fees and the start of the school day.
+- Receives and answers admission enquiries, and moves admission applications through their own stages.
 
 **The Kidscover Admin (operations)**
-- Runs the data pipeline, reviews what the website reader finds, moderates parent reviews, answers enquiries, moves places between categories, manages school staff, and can see and undo every change schools make.
+- Runs the data pipeline, reviews what the website reader finds, moderates parent reviews, answers enquiries for schools with no staff on Kidscover yet, moves places between categories, manages school staff, connects a partner school's own system, and can see and undo every change schools make.
 
 ---
 
 ## 3. Features & Functional Requirements
 
-Status: **Built** (in the app or portal today), **Partly built**, **Planned**.
+**How to read the status column.** *Built* means the code is written, covered by tests and merged to main. It does
+**not** by itself mean the feature is switched on in the live project: the second phase needs its migrations run and
+its edge functions deployed first. §8 says exactly what is live today and what is waiting on a setup step.
 
 | # | Feature | Status |
 |---|---|---|
-| 3.1 | Sign-in and profiles | Built (email + password, fingerprint unlock, language, notifications, delete account) |
-| 3.2 | Location-based discovery: near me, distance, drive times | Built |
+| 3.1 | Sign-in and profiles | Partly built (email + password, fingerprint unlock, language, notifications, delete account; other sign-in methods, avatar and dark mode not started) |
+| 3.2 | Location-based discovery: near me, distance, drive times, arrive-by, dashboard tiles | Built |
 | 3.3 | Discover list, categories, filters and the cost filter | Built |
-| 3.4 | School detail page, fees breakdown and comparing four schools | Built |
+| 3.4 | School detail page, fee breakdown and comparing four schools | Built |
 | 3.5 | Admissions enquiries, answered by Kidscover and by each school | Built |
 | 3.6 | Parent reviews and moderation | Built |
 | 3.7 | School data pipeline | Built |
@@ -57,125 +60,122 @@ Status: **Built** (in the app or portal today), **Partly built**, **Planned**.
 | 3.11 | Fees and the true cost of a year | Built |
 | 3.12 | The Kidscover Standard admission form, and the school's own system | Built |
 | 3.13 | Notifications on a parent's phone | Built |
-| 3.14 | 31 languages | Built (6 translated, the rest fall back to English) |
+| 3.14 | 31 languages | Built — all 31 translated |
 | 3.15 | Security: two-step sign-in, tightened rights, deleting an account | Built |
 
 ### 3.1 Authentication & User Profiles (P0) — Partly built
-- **Built:** sign up and sign in with email and password; email confirmation required before writing reviews or enquiries. Roles: parent, school_admin (a school's staff), admin (Kidscover); users cannot change their own role.
-- **Planned:** Google, Microsoft and phone (OTP) sign-in; profile picture or stock avatar; settings (dark mode, push notifications, biometric login, language).
+- **Built:** sign up and sign in with email and password; email confirmation required before writing reviews or
+  enquiries. Roles: parent, school_admin (a school's staff), admin (Kidscover); users cannot change their own role.
+- **Built:** settings — the language of the whole app, notifications on or off, unlocking with a fingerprint or face,
+  and deleting the account and everything in it.
+- **Not started:** Google, Microsoft and phone (OTP) sign-in; a profile picture or stock avatar; dark mode.
 
 ### 3.2 Location-Based Discovery (P0) — Built
-- **Use my location:** the phone's position (rounded to about 100 m) is used only to measure distance; it is never stored in the database or on the phone. Refusing permission leaves everything else working.
-- **Distance on every school, "Nearest first", "Within 2 / 5 / 10 km"** (straight-line, labelled as such). Schools without coordinates are left out of near-me lists only.
-- **Drive time by car** (Google Routes API, traffic-aware): "Weekday 7:30 am" (the next school-run departure, India time) or "Right now", for the schools on screen, 20 at a time. Google plans car trips by departure time only, so "arrive by" is shown as a departure at school-run time.
-- **Cost control:** limits in the database, changeable by an admin: 20 lookups per parent per day and 500 schools per day for the whole app by default. Kidscover stores only a count of lookups per parent per day, never where anyone was.
-- **Planned:** location fallback order (GPS > address book > last session > ask); dashboard tiles (schools in area, admissions open / closed); arrival time computed from each school's own start time.
+- **Use my location:** the phone's position (rounded to about 100 m) is used only to measure distance; it is never
+  stored in the database or on the phone. Refusing permission leaves everything else working.
+- **Distance on every school, "Nearest first", "Within 2 / 5 / 10 km"** (straight-line, labelled as such). Schools
+  without coordinates are left out of near-me lists only.
+- **Drive time by car** (Google Routes API, traffic-aware), in three framings: "Weekday 7:30 am" (the next school-run
+  departure, India time), "Right now", and **"By the time school starts"** — which reads each school's own start time
+  and answers "leave by 7:12 to reach 8:00", grouping schools that start at the same time into one lookup. When a
+  school has not given its start time, 8:00 am is assumed and labelled as an assumption.
+- **Dashboard tiles** above the list: how many schools are in the area on screen, how many have admissions open, and
+  how many have given their fees — counted in the database.
+- **Cost control:** limits in the database, changeable by an admin: 20 lookups per parent per day and 500 schools per
+  day for the whole app by default. Kidscover stores only a count of lookups per parent per day, never where anyone was.
+- **Not started:** a location fallback order (GPS > address book > last session > ask). Today it is GPS, or search by
+  name and area.
 
 ### 3.3 Discover List, Categories & Filters (P0) — Built
-- **Categories:** every place is a *school* (preschool to class 12, junior colleges included), an *after-school class* (music, dance, sports, art, abacus, tuition) or a *college* (degree, engineering, business, law, medicine, teacher training). The app opens on Schools; the other two are one tap away. Places not for children (driving schools, gyms, IELTS classes, shops, offices) are hidden.
-- **Search** by name or area; **filters:** level (preschool, primary, secondary, not stated), daycare, board (with "also show schools whose board is not known yet"), Google rating (with "include unrated"), sort (A to Z, best rated, nearest). Level, daycare and board apply to schools only and are set aside, not cleared, on the other lists.
-- **Planned:** True Total Cost of Ownership filter (tuition, transport, cafeteria, uniform, admission and registration fees in one annual figure); established age of the institution.
+- **Categories:** every place is a *school* (preschool to class 12, junior colleges included), an *after-school class*
+  (music, dance, sports, art, abacus, tuition) or a *college* (degree, engineering, business, law, medicine, teacher
+  training). The app opens on Schools; the other two are one tap away. Places not for children (driving schools, gyms,
+  IELTS classes, shops, offices) are hidden.
+- **Search** by name or area; **filters:** level (preschool, primary, secondary, not stated), daycare, board (with
+  "also show schools whose board is not known yet"), Google rating (with "include unrated"), **first-year cost** (with
+  "also show schools whose fees nobody has given yet"), admissions open, sort (A to Z, best rated, nearest, lowest
+  cost). Level, daycare, board and cost apply to schools only and are set aside, not cleared, on the other lists.
+- **Not started:** filtering by how long the institution has been established.
 
 ### 3.4 School Detail Page (P1) — Built
-- **Photo:** uploaded by the school (it confirms it may publish it) or a free-licensed Wikimedia Commons photo shown with its author and licence; with no photo, a drawn school in colours of its own. No paid or copyrighted image sources.
-- **Facts, each with its source:** levels (set by the school or Kidscover if they have set them; otherwise from the name, Google and, once accepted, the school's website); board ("confirmed by CBSE's own record", "from the school's website", "from the school's name"); admission status with year ("from the school's website, checked Sep 2026"); Google rating; parent reviews.
-- **Facilities** (20 kinds: cafeteria, open and indoor play, pool, courts, library, science / computer / maths / STEM / AI labs, smart classrooms, auditorium, art and music rooms, school bus, medical room, CCTV, air conditioning, special needs support, teacher-student ratio).
-- **Achievements** the school claims: class 10 and class 12 results, college placements, notable alumni, awards; newest first; each marked with its source and linked to where it was published.
-- **Ask about admissions** (schools only) and the school's website link.
-- **Planned:** enrolment size; fee breakdown (TCO); side-by-side comparison of up to 4 schools.
+- **Photo:** uploaded by the school (it confirms it may publish it) or a free-licensed Wikimedia Commons photo shown
+  with its author and licence; with no photo, a drawn school in colours of its own. No paid or copyrighted image
+  sources.
+- **Facts, each with its source:** levels (set by the school or Kidscover if they have set them; otherwise from the
+  name, Google and, once accepted, the school's website); board ("confirmed by CBSE's own record", "from the school's
+  website", "from the school's name"); admission status with year ("from the school's website, checked Sep 2026");
+  Google rating; parent reviews; the time the school day starts.
+- **Facilities** (20 kinds: cafeteria, open and indoor play, pool, courts, library, science / computer / maths / STEM /
+  AI labs, smart classrooms, auditorium, art and music rooms, school bus, medical room, CCTV, air conditioning,
+  special needs support, teacher-student ratio).
+- **Achievements** the school claims: class 10 and class 12 results, college placements, notable alumni, awards;
+  newest first; each marked with its source and linked to where it was published.
+- **The cost of a year**, broken down (see 3.11), and **comparing up to four schools side by side** — cost, distance,
+  drive time, levels, board, admissions, both ratings and the start of the school day, in one scrolling table.
+- **Ask about admissions** and **apply with the Kidscover Standard form** (schools only), and the school's website link.
+- **Not started:** enrolment size (how many children the school has).
 
 ### 3.5 Admissions Enquiries (P1) — Built
-- A short form (which class, roughly when, the question). It deliberately does **not** ask for a child's name or date of birth.
-- A conversation per school under **Enquiries**, with an unread count. Replies show as coming from "the school". One open enquiry per school; at most 10 new enquiries a day; a confirmed email is required; either side can close, writing again reopens.
-- **Partner Portal inbox** for answering, with "need a reply" counts.
-- **Planned:** partner schools' own staff answer their enquiries; the Kidscover Standard admission form pushed to a partner school's CRM by webhook; outbound-click logging for non-partner schools; push notifications for replies.
+- A short form (which class, roughly when, the question). It deliberately does **not** ask for a child's name or date
+  of birth.
+- A conversation per school under **Enquiries**, with an unread count. Replies show as coming from "the school". One
+  open enquiry per school; at most 10 new enquiries a day; a confirmed email is required; either side can close,
+  writing again reopens.
+- **Answered by the school itself** where the school has staff on Kidscover, and by Kidscover staff where it does not.
+  A school's staff never see the parent's email address; Kidscover admins do.
+- **Partner Portal inbox** for answering, with "need a reply" counts, and a nudge that sends the parent's phone a
+  notification.
 
 ### 3.6 Parent Reviews & Moderation (P1) — Built
-- Anonymous reviews (rating, optional title, text, relationship to the school), one per parent per school; a new or edited review is pending until a moderator publishes it; parents can report others' reviews; the Parent Reviews tab in the portal publishes, rejects and handles reports.
+- Anonymous reviews (rating, optional title, text, relationship to the school), one per parent per school; a new or
+  edited review is pending until a moderator publishes it; parents can report others' reviews; the Parent Reviews tab
+  in the portal publishes, rejects and handles reports.
 
 ### 3.7 School Data Pipeline — Built
 - **Import:** Google Places (Mumbai / Thane box) for names, addresses, coordinates, types and ratings.
-- **Quality rules and categories** in the database (from the name first, Google's type second); an admin can move any single place or hide it, with a reason shown for every automatic decision.
-- **Website reader** (edge function, run by an admin in batches): obeys robots.txt, identifies itself, reads the home page and up to three more pages per school, refuses private addresses and re-checks redirects. It finds:
-  - **Board:** English, Marathi and Hindi wording, and CBSE affiliation numbers checked against CBSE's public record (confirmed only when the record is in Maharashtra and matches the PIN, website or name).
+- **Quality rules and categories** in the database (from the name first, Google's type second); an admin can move any
+  single place or hide it, with a reason shown for every automatic decision.
+- **Website reader** (edge function, run by an admin in batches): obeys robots.txt, identifies itself, reads the home
+  page and up to three more pages per school, refuses private addresses (by name **and** by the address they resolve
+  to) and re-checks redirects. It finds:
+  - **Board:** English, Marathi and Hindi wording, and CBSE affiliation numbers checked against CBSE's public record
+    (confirmed only when the record is in Maharashtra and matches the PIN, website or name).
   - **Levels:** ranges such as "Nursery to Grade 10", "Classes I to X" and "iyatta 5 vi te 10 vi", plus named sections.
   - **Admission status** with its year; old notices are marked and cannot be used.
   - **Facilities**, including a teacher-student ratio.
   - **Claimed achievements.**
 
   On a website shared by several schools, only this school's pages are read.
-- **Review:** everything found waits in the School Data tab with the sentence and page it came from; nothing reaches parents until an admin accepts it; what the school or Kidscover entered is never overwritten by a website finding. Schools are re-read every 30 days.
-- **Not used (and not worked around):** the CISCE directory (behind a CAPTCHA), open UDISE+ extracts (no board column, no licence), and parts of CBSE's site that refuse automated access.
+- **Review:** everything found waits in the School Data tab with the sentence and page it came from; nothing reaches
+  parents until an admin accepts it; what the school or Kidscover entered is never overwritten by a website finding.
+  Schools are re-read every 30 days.
+- **Not used (and not worked around):** the CISCE directory (behind a CAPTCHA), open UDISE+ extracts (no board column,
+  no licence), and parts of CBSE's site that refuse automated access.
 
 ### 3.8 School Profiles, School Staff & the Change Log — Built
-- A Kidscover admin adds a school's staff by email (they sign up first); staff can edit only their own school: levels, photo, facilities, achievements.
-- Levels set by hand (daycare, preschool, primary, secondary) replace the automatic ones, so a school whose name and website say nothing can still be found under the right level, and a wrong level can be removed. "Back to automatic" returns the school to the rules.
-- Changes go live at once. Database triggers record every change (who, their role, when, before and after), so nothing escapes the log. A Kidscover admin sees all changes, and can undo the latest change to anything; the undo is logged too.
-- Photos upload to a public storage bucket, one folder per school, JPEG / PNG / WebP up to 5 MB; only that school's staff (or an admin) can write to its folder.
+- A Kidscover admin adds a school's staff by email (they sign up first); staff can edit only their own school: levels,
+  photo, facilities, achievements, fees and the start of the school day.
+- Levels set by hand (daycare, preschool, primary, secondary) replace the automatic ones, so a school whose name and
+  website say nothing can still be found under the right level, and a wrong level can be removed. "Back to automatic"
+  returns the school to the rules.
+- Changes go live at once. Database triggers record every change (who, their role, when, before and after), so nothing
+  escapes the log. A Kidscover admin sees all changes, and can undo the latest change to anything; the undo is logged
+  too.
+- Photos upload to a public storage bucket, one folder per school, JPEG / PNG / WebP up to 5 MB; only that school's
+  staff (or an admin) can write to its folder, and only an address on Kidscover's own storage is accepted.
 
 ### 3.9 Look and Feel — Built
-- A warm palette (violet, coral, sunshine and mint on lavender), a logo, a welcome drawing of a parent walking a child to school on the sign-in screen, a welcome banner that changes with the list, a picture on every school card, and icons for categories, facilities and achievements. All drawings are made in code, so there is nothing to license.
+- A warm palette (violet, coral, sunshine and mint on lavender), a logo, a welcome drawing of a parent walking a child
+  to school on the sign-in screen, a welcome banner that changes with the list, a picture on every school card, and
+  icons for categories, facilities and achievements. All drawings are made in code, so there is nothing to license.
 
 ### 3.10 Partner Portal (Admin Web App) — Built
-- **Tabs:**
-  - Admissions Pipeline;
-  - Admissions Enquiries (inbox);
-  - Parent Reviews (moderation);
-  - School Data (website reader and review);
-  - Categories;
-  - School Profiles (edit any school, staff, change log with undo).
+- **Kidscover admin tabs:** Admissions Pipeline; Admissions Enquiries (inbox); Applications; Parent Reviews
+  (moderation); School Data (website reader and review); Categories; School Profiles (edit any school, staff, fees,
+  the school day, the school's own system, outbound clicks, change log with undo); Security.
 - **Panels:** data pipeline sweep, and drive-time usage and limits with a live test button.
-- School staff get their own dashboard showing only their school.
-
----
-
-## 4. Data Sources, Licensing & Trust
-
-| Data | Source | How it is used |
-|---|---|---|
-| School list, location, types, Google rating | Google Places API | Imported; rating shown as "Google 4.6 ★ (212)" |
-| Drive times | Google Routes API | Computed on request; nothing stored but a daily count |
-| Board, levels, admissions, facilities, achievements | The school's own website | Suggested by the reader, accepted by an admin, shown with the page it came from |
-| CBSE affiliation | CBSE public record (SARAS) | Confirms a number the school states |
-| Photos | The school (with permission) or Wikimedia Commons | Commons photos always show author and licence |
-| Anything a school edits | The school's staff | Live, logged, undoable |
-| Reviews | Parents | Moderated before publishing |
-
----
-
-## 5. Privacy & Security
-
-- The parent's location is never stored; enquiries collect no child data; reviews are anonymous.
-- Row level security on every table; parents read only visible schools and their own data; writes to sensitive data go through database functions that check who is asking; signed-out visitors cannot call any of them.
-- No secret keys in the app, the portal or the repositories; edge functions act as the signed-in person.
-- Every school-profile change is logged and undoable.
-
----
-
-## 6. Technical Architecture
-
-| Layer | Technology |
-|---|---|
-| Parent app | React Native (Expo), a single `App.js` runnable in Snack (web and Expo Go); react-native-svg for the drawings |
-| Partner Portal | Next.js (React) |
-| Backend / database | Supabase: PostgreSQL with row level security, SQL functions and triggers, Storage (school photos), Auth |
-| Server functions | Supabase Edge Functions (Deno): commute-times (Google Routes), read-school-websites (the reader), ingest-mumbai-schools |
-| Integrations | Google Places API, Google Routes API (computeRouteMatrix), CBSE SARAS record, Wikimedia Commons API |
-
-**Database changes** ship as numbered migrations (`supabase/migrations/`), run in order in the Supabase SQL Editor; each is safe to run more than once.
-
----
-
-## 7. Quality
-
-Every feature ships with automated tests:
-- the database rules against an in-memory Postgres;
-- the edge functions against stand-in web pages and databases;
-- the app and portal screens in a simulated browser.
-
-"Mutation testing" then breaks the code on purpose, hundreds of ways, to prove the tests notice. The rare breakages the tests don't catch are either shown to change nothing or given a new test.
-
----
+- **School staff** get their own dashboard showing only their school: its enquiries, its applications, its profile and
+  its fees.
 
 ### 3.11 Fees and the True Cost of a Year — Built
 - Each school gives its fees per level (daycare, preschool, primary, secondary) in the Partner Portal: tuition, school
@@ -202,14 +202,17 @@ Every feature ships with automated tests:
 ### 3.13 Notifications — Built
 - A parent's phone is told when a school replies to their enquiry, or moves their application along.
 - Notifications never carry the words of a message: "the school replied", never what was said.
-- Each one is sent in the parent's own language. They can switch them off in Settings.
+- Each one is sent in the parent's own language, from the same translations the app itself uses, so the notification
+  and the screen it opens always say the same thing. They can switch them off in Settings.
 
 ### 3.14 Languages — Built
 - 31: English, the 22 languages of the Eighth Schedule of the Constitution, and Arabic, Chinese, French, German,
-  Japanese, Portuguese, Russian and Spanish.
+  Japanese, Portuguese, Russian and Spanish. **All 31 are translated**; nothing falls back to English any more.
 - Chosen on the sign-in screen or in Settings, saved with the profile, so it follows the parent to a new phone.
 - Arabic, Urdu, Kashmiri and Sindhi lay the screen out right to left. Money and dates follow the language.
 - Text people type (reviews, achievements, addresses) is shown as written; nothing is machine-translated.
+- **Before a public launch, a native speaker should read each language.** They were translated carefully, but a school
+  application is not the place for a clumsy sentence.
 
 ### 3.15 Security — Built
 - Two-step sign-in for the Partner Portal, and a switch that requires it for every Kidscover admin and school staff
@@ -220,16 +223,98 @@ Every feature ships with automated tests:
   fingerprint.
 - The full review, what it found and what only the project owner can do: **SECURITY.md**.
 
-## 8. Roadmap (next phase)
+---
+
+## 4. Data Sources, Licensing & Trust
+
+| Data | Source | How it is used |
+|---|---|---|
+| School list, location, types, Google rating | Google Places API | Imported; rating shown as "Google 4.6 ★ (212)" |
+| Drive times | Google Routes API | Computed on request; nothing stored but a daily count |
+| Board, levels, admissions, facilities, achievements | The school's own website | Suggested by the reader, accepted by an admin, shown with the page it came from |
+| CBSE affiliation | CBSE public record (SARAS) | Confirms a number the school states |
+| Photos | The school (with permission) or Wikimedia Commons | Commons photos always show author and licence |
+| Fees, the school day, anything a school edits | The school's staff | Live, logged, undoable |
+| Reviews | Parents | Moderated before publishing |
+| Applications | The family | Read only by that family, that school and a Kidscover admin |
+
+---
+
+## 5. Privacy & Security
+
+- The parent's location is never stored; enquiries collect no child data; reviews are anonymous; an application is
+  read only by the family, the school it names and a Kidscover admin.
+- Row level security on every table; parents read only visible schools and their own data; writes to sensitive data go
+  through database functions that check who is asking; signed-out visitors cannot call any of them.
+- No secret keys in the app, the portal or the repositories; edge functions act as the signed-in person except for the
+  few that must not, and those are closed to everyone but the service role.
+- Every school-profile change is logged and undoable.
+- Notifications carry no message text; a locked screen is not a private place.
+
+---
+
+## 6. Technical Architecture
+
+| Layer | Technology |
+|---|---|
+| Parent app | React Native (Expo SDK 57), a single `App.js`; react-native-svg for the drawings; expo-secure-store and expo-local-authentication for the locked sign-in; expo-notifications for push |
+| Partner Portal | Next.js (React), with security headers and a content security policy |
+| Backend / database | Supabase: PostgreSQL with row level security, SQL functions and triggers, Storage (school photos), Auth (including two-step sign-in) |
+| Server functions | Supabase Edge Functions (Deno): commute-times (Google Routes), read-school-websites (the reader), ingest-mumbai-schools, send-push (Expo push), crm-deliver (a school's own system), delete-account |
+| App delivery | EAS Build for the Android APK; EAS Update for over-the-air changes to the app's own code |
+| Integrations | Google Places API, Google Routes API (computeRouteMatrix), CBSE SARAS record, Wikimedia Commons API, Expo push service, Firebase Cloud Messaging (Android delivery) |
+
+**Database changes** ship as numbered migrations (`supabase/migrations/`), run in order in the Supabase SQL Editor;
+each is safe to run more than once.
+
+---
+
+## 7. Quality
+
+Every feature ships with automated tests:
+- the database rules against an in-memory Postgres;
+- the edge functions against stand-in web pages and databases;
+- the app and portal screens in a simulated browser;
+- the language packs against English, for missing words, lost `{placeholders}` and lines left untranslated.
+
+"Mutation testing" then breaks the code on purpose, hundreds of ways, to prove the tests notice. The rare breakages
+the tests don't catch are either shown to change nothing or given a new test.
+
+---
+
+## 8. What is live, and what is merged but waiting on a setup step
+
+Everything in §3 marked *Built* is merged to main and tested. Some of it needs a one-time action before a parent can
+see it, because migrations and edge functions are deployed by hand.
+
+| Part | State |
+|---|---|
+| The MVP: discovery, categories, filters, school pages, enquiries, reviews, the website reader, school profiles, staff, the change log, levels by hand | **Live** — migrations to 20260919001400 run, functions deployed, in use |
+| Fees, applications, notifications, languages, security, tiles, arrive-by, comparing schools | **Merged.** Needs migrations `20260920000100`–`20260920000600` run in order; `send-push`, `crm-deliver` and `delete-account` deployed; `commute-times` and `read-school-websites` redeployed; the secret `SB_SECRET_KEY` set |
+| A notification actually arriving on a phone | Also needs a Firebase project connected to the EAS build, and ideally `EXPO_ACCESS_TOKEN` |
+| Two-step sign-in required for everyone who works on families' details | Merged; switch it on in the portal's **Security** tab |
+| The app on a real phone | Needs an APK from `eas build --platform android --profile preview` |
+
+**None of these is a code change.** Until they are done, the second-phase features exist in main and in the tests, but
+not in front of a parent.
+
+---
+
+## 9. Roadmap (next phase)
 
 1. Google, Microsoft and phone (OTP) sign-in; a profile picture; dark mode.
-2. The remaining 25 language packs, each read by a native speaker before launch.
+2. A native speaker's read of each of the 31 languages before a public launch.
 3. Fees from each school's own fee page, read the way boards and facilities are read today.
-4. The app in the Play Store: a production build, a privacy policy, Google's review.
+4. The app in the Play Store: a production build, a privacy policy, Google's review. An iOS build needs an Apple
+   developer account.
 5. The reader in more languages (Marathi and Hindi facilities and achievements), and classes 11-12 as their own level.
-6. An independent penetration test before real families use it (see SECURITY.md).
+6. Enrolment size and how long a school has been established, as facts and as filters.
+7. A location fallback order (GPS > address book > last session > ask).
+8. An independent penetration test before real families use it (see SECURITY.md).
 
-## 9. Out of Scope for Now
+---
+
+## 10. Out of Scope for Now
 
 - AI sentiment analysis of social media (Reddit and other unstructured sources); reviews stay first-party and moderated.
 - Payment gateway for admission fees.

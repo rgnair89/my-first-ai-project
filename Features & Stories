@@ -1,8 +1,11 @@
 # Product Requirements Document (PRD): Kidscover — Feature & User Story Breakdown
 
 **Author:** Rajasekharan Gopakumar
-**Document Status:** v1.2 — MVP and the second phase built; each story marked Built, Partly built or Planned
-**Last Updated:** 20 September 2026 (second phase)
+**Document Status:** v1.3 — 59 of 64 stories built, 4 partly built, 1 not started; see the tally at the end
+**Last Updated:** 21 September 2026
+
+*Built* means written, tested and merged. PRD §8 says which of it is switched on in the live project and which is
+still waiting on a migration, a deploy or an APK.
 
 ---
 
@@ -11,13 +14,13 @@
 **Description:** Secure access and personalisation for parents, school staff and Kidscover admins.
 
 ### Frontend User Stories
-- **US1.1 (Parent/Admin) — Partly built:** As a user, I want to sign up and log in using my phone number (OTP), Google, Microsoft, or Email account so that I can securely access the app without remembering a new password. *Email + password is built; Google, Microsoft and OTP are planned.*
-- **US1.2 (Parent/Admin) — Planned:** As a user, I want to upload a profile picture or select a stock cartoon avatar so that I can personalise my account.
-- **US1.3 (Parent) — Planned:** As a user, I want to manage my app settings (Dark Mode, Push Notifications, Biometric Login, Language) so that the app matches my device preferences.
+- **US1.1 (Parent/Admin) — Partly built:** As a user, I want to sign up and log in using my phone number (OTP), Google, Microsoft, or Email account so that I can securely access the app without remembering a new password. *Email + password is built; Google, Microsoft and OTP are not started.*
+- **US1.2 (Parent/Admin) — Not started:** As a user, I want to upload a profile picture or select a stock cartoon avatar so that I can personalise my account.
+- **US1.3 (Parent) — Partly built:** As a user, I want to manage my app settings (Dark Mode, Push Notifications, Biometric Login, Language) so that the app matches my device preferences. *Push notifications, fingerprint or face unlock, language and deleting my account are built; dark mode is not started.*
 
 ### Backend User Stories
-- **US1.4 (Backend) — Partly built:** As a system, I need to integrate with OAuth providers (Google, Microsoft) and an SMS gateway (for OTP) to authenticate users securely and generate session tokens. *Supabase Auth with email is built.*
-- **US1.5 (Backend) — Built:** As a system, I need to securely store user profile data and let each user edit only their own name and phone; roles (parent, school_admin, admin) are set by the system only.
+- **US1.4 (Backend) — Partly built:** As a system, I need to integrate with OAuth providers (Google, Microsoft) and an SMS gateway (for OTP) to authenticate users securely and generate session tokens. *Supabase Auth with email is built, with two-step sign-in for the portal; OAuth and SMS are not started.*
+- **US1.5 (Backend) — Built:** As a system, I need to securely store user profile data and let each user edit only their own name, phone, language and notification choice; roles (parent, school_admin, admin) are set by the system only.
 
 ---
 
@@ -26,14 +29,14 @@
 **Description:** Discovery by real distance and drive time rather than guesswork.
 
 ### Frontend User Stories
-- **US2.1 (Parent) — Partly built:** As a parent, I want the app to use my location so that I immediately see schools near me, with the distance on each and "nearest first". *Built with GPS; the fallback to address book / last session is planned.*
-- **US2.2 (Parent) — Planned:** As a parent, I want dashboard tiles showing the number of schools, open admissions and closed admissions in my area.
-- **US2.3 (Parent) — Partly built:** As a parent, I want to see how long the drive to each school takes at school-run time. *Built: "Weekday 7:30 am" and "Right now" drive times; an "Arrive By" time from each school's start time is planned.*
-- **US2.4 (Parent) — Partly built:** As a parent, I want to filter by board, level, daycare, rating and distance so that I only see viable options. *Built; the TCO filter and school-age filter are planned.*
+- **US2.1 (Parent) — Partly built:** As a parent, I want the app to use my location so that I immediately see schools near me, with the distance on each and "nearest first". *Built with GPS; the fallback to address book / last session is not started.*
+- **US2.2 (Parent) — Built:** As a parent, I want dashboard tiles showing the number of schools, open admissions and schools with fees listed in my area.
+- **US2.3 (Parent) — Built:** As a parent, I want to see how long the drive to each school takes at school-run time, right now, or in time for the school's own start — "leave by 7:12 to reach 8:00".
+- **US2.4 (Parent) — Built:** As a parent, I want to filter by board, level, daycare, rating, distance and first-year cost so that I only see viable options.
 
 ### Backend User Stories
 - **US2.5 (Backend) — Built:** As a system, I need to query the Google Routes API with the parent's rounded position and the schools' coordinates, traffic-aware, within daily limits per parent and for the whole app, storing nothing but a daily count.
-- **US2.6 (Backend) — Planned:** As a system, I need to aggregate fee data into a single TCO figure for filtering.
+- **US2.6 (Backend) — Built:** As a system, I need to aggregate fee data into a single first-year figure per school, kept up to date by a trigger, so the list can filter and sort on it.
 - **US2.7 (Backend) — Built:** As a system, I need a distance function that returns each visible school's straight-line distance, so near-me lists can be filtered and sorted in the database.
 
 ---
@@ -44,13 +47,13 @@
 
 ### Frontend User Stories
 - **US3.1 (Parent) — Built:** As a parent, I want a school page with its photo, levels, board, admission status, Google rating, facilities and achievements, each saying where it came from, so I can judge the school.
-- **US3.2 (Parent) — Planned:** As a parent, I want a full breakdown of the fees that make up the TCO.
-- **US3.3 (Parent) — Planned:** As a parent, I want to compare up to 4 schools side by side.
+- **US3.2 (Parent) — Built:** As a parent, I want a full breakdown of the fees that make up the first-year cost.
+- **US3.3 (Parent) — Built:** As a parent, I want to compare up to 4 schools side by side.
 - **US3.6 (Parent) — Built:** As a parent, I want schools, after-school classes and colleges kept apart, so the main list holds only schools from preschool to class 12.
 - **US3.7 (Parent) — Built:** As a parent, I want a friendly, colourful app with a picture on every school (its photo, or a drawing when there is none).
 
 ### Backend User Stories
-- **US3.4 (Backend) — Built:** As a system, I need to deliver full school profile data: facilities, achievements, photo with credit, and facts with their sources.
+- **US3.4 (Backend) — Built:** As a system, I need to deliver full school profile data: facilities, achievements, photo with credit, fees, the start of the school day, and facts with their sources.
 - **US3.5 (Backend) — Built:** As a system, I need to import Google Places data (ratings, types, location) for the market's schools.
 - **US3.8 (Backend) — Built:** As a system, I need to sort every place into school / after-school class / college, and hide places not for children, from the name first and Google's type second, with admin overrides.
 
@@ -61,13 +64,13 @@
 **Description:** Connecting parents to schools.
 
 ### Frontend User Stories
-- **US4.1 (Parent) — Partly built:** As a parent, I want to ask a school about admissions (class, roughly when, my question) and continue the conversation in the app. *Built as enquiries; the full Kidscover Standard application form is planned.*
+- **US4.1 (Parent) — Built:** As a parent, I want to ask a school about admissions (class, roughly when, my question) and continue the conversation in the app, and to apply with the Kidscover Standard form when I am ready.
 - **US4.2 (Parent) — Built:** As a parent viewing a school, I want a link to its own website.
-- **US4.3 (School Admin) — Partly built:** As a school admissions user, I want a dashboard of incoming enquiries and applications. *The enquiry inbox is built for Kidscover staff; access for partner schools' own staff is planned.*
+- **US4.3 (School Admin) — Built:** As a school admissions user, I want a dashboard of incoming enquiries and applications for my own school, and nothing from any other school.
 
 ### Backend User Stories
-- **US4.4 (Backend) — Planned:** As a system, I need to push the Kidscover Standard form to a partner school's CRM by webhook.
-- **US4.5 (Backend) — Planned:** As a system, I need to log outbound clicks to non-partner schools.
+- **US4.4 (Backend) — Built:** As a system, I need to push the Kidscover Standard form to a partner school's CRM by webhook, signed with that school's secret, retried on failure, never following a redirect and never reaching a private address.
+- **US4.5 (Backend) — Built:** As a system, I need to log outbound clicks to schools' own pages as counts, never as who clicked.
 - **US4.6 (Backend) — Built:** As a system, I need enquiry limits (one open enquiry per school, 10 new a day, confirmed email) and no child data in an enquiry.
 
 ---
@@ -78,47 +81,45 @@
 
 ### Frontend User Stories
 - **US5.1 (Parent) — Built:** As a parent, I want to message a school without sharing my phone number, and see how many replies I have not read.
-- **US5.2 (School Admin) — Partly built:** As an admissions user, I want to reply to parents in the portal. *Built for Kidscover staff.*
-- **US5.3 (Parent) — Planned:** As a parent, I want push notifications when a school replies.
-
-### Backend User Stories
-- **US5.4 (Backend) — Built:** As a system, I need a messaging schema tying each conversation to the parent and the school, with read marks for both sides.
-- **US5.5 (Backend) — Planned:** As a system, I need push notifications (Firebase Cloud Messaging / APNs) triggered by replies and status changes.
+- **US5.2 (School Admin) — Built:** As an admissions user, I want to reply to parents in the portal — the school's own staff for their school, Kidscover staff for the rest — without a school's staff ever seeing the parent's email address.
+- **US5.3 (Parent) — Built:** As a parent, I want push notifications when a school replies or my application moves on.
+- **US5.4 (Backend) — Built:** As a system, I need a messaging schema tying each conversation to the parent and the school, with read marks for both sides, and a record of who sent each message: the parent, the school, or Kidscover.
+- **US5.5 (Backend) — Built:** As a system, I need push notifications (Expo push over Firebase Cloud Messaging) triggered by replies and status changes, queued in the database and sent in batches, with dead tokens forgotten.
 
 ---
 
 ## Feature 6: Parent Reviews & Moderation — Built
 
-- **US6.1 (Parent):** As a parent, I want to write an anonymous review (rating, text, how I know the school), edit or delete it, and report others' reviews.
-- **US6.2 (Kidscover Admin):** As a moderator, I want to publish or reject pending reviews and handle reports, so only fair reviews show.
-- **US6.3 (Backend):** As a system, I need one review per parent per school, pending until published, and a confirmed email to write or report.
+- **US6.1 (Parent) — Built:** As a parent, I want to write an anonymous review (rating, text, how I know the school), edit or delete it, and report others' reviews.
+- **US6.2 (Kidscover Admin) — Built:** As a moderator, I want to publish or reject pending reviews and handle reports, so only fair reviews show.
+- **US6.3 (Backend) — Built:** As a system, I need one review per parent per school, pending until published, and a confirmed email to write or report.
 
 ---
 
 ## Feature 7: School Data from School Websites — Built
 
-- **US7.1 (Kidscover Admin):** As an admin, I want the system to read each school's own website and suggest its board, levels, admission status, facilities and claimed achievements, each with the sentence and page it came from.
-- **US7.2 (Kidscover Admin):** As an admin, I want to accept or reject each suggestion (strong ones ticked, weak ones not), and accept CBSE boards confirmed by CBSE's record in bulk.
-- **US7.3 (Backend):** As a system, I need to read politely (robots.txt, a few pages, size and time limits), safely (no private addresses, redirects re-checked), and in English, Marathi and Hindi; to confirm CBSE affiliation numbers against CBSE's record; and never to overwrite what a school entered itself.
-- **US7.4 (Parent):** As a parent, I want to see where each fact came from and when it was checked.
+- **US7.1 (Kidscover Admin) — Built:** As an admin, I want the system to read each school's own website and suggest its board, levels, admission status, facilities and claimed achievements, each with the sentence and page it came from.
+- **US7.2 (Kidscover Admin) — Built:** As an admin, I want to accept or reject each suggestion (strong ones ticked, weak ones not), and accept CBSE boards confirmed by CBSE's record in bulk.
+- **US7.3 (Backend) — Built:** As a system, I need to read politely (robots.txt, a few pages, size and time limits), safely (no private addresses by name or by the address they resolve to, redirects re-checked), and in English, Marathi and Hindi; to confirm CBSE affiliation numbers against CBSE's record; and never to overwrite what a school entered itself.
+- **US7.4 (Parent) — Built:** As a parent, I want to see where each fact came from and when it was checked.
 
 ---
 
 ## Feature 8: School Profiles, School Staff & the Change Log — Built
 
-- **US8.1 (Kidscover Admin):** As an admin, I want to give a school's staff access to edit their own school's page, by email.
-- **US8.2 (School Admin):** As a school's staff member, I want to upload our photo (confirming we may publish it), list our facilities (with details such as our teacher-student ratio) and our achievements (results, placements, alumni, awards), and see our change history.
-- **US8.3 (Kidscover Admin):** As an admin, I want to see every change any school makes (who, when, before and after) and undo any of them, so the data stays accurate.
-- **US8.4 (Kidscover Admin):** As an admin, I want to find free-licensed photos of a school on Wikimedia Commons and use one with its author and licence.
-- **US8.5 (Backend):** As a system, I need the change log written by database triggers (so nothing escapes it), edits allowed only through functions that check the school, and a photo bucket where each school can write only to its own folder.
-- **US8.6 (Kidscover Admin / School Admin):** As an admin or a school's staff member, I want to set the school's levels by hand when the automatic ones are missing ("Level not stated") or wrong, and hand it back to the automatic levels later, with every change in the change log.
+- **US8.1 (Kidscover Admin) — Built:** As an admin, I want to give a school's staff access to edit their own school's page, by email.
+- **US8.2 (School Admin) — Built:** As a school's staff member, I want to upload our photo (confirming we may publish it), list our facilities (with details such as our teacher-student ratio) and our achievements (results, placements, alumni, awards), and see our change history.
+- **US8.3 (Kidscover Admin) — Built:** As an admin, I want to see every change any school makes (who, when, before and after) and undo any of them, so the data stays accurate.
+- **US8.4 (Kidscover Admin) — Built:** As an admin, I want to find free-licensed photos of a school on Wikimedia Commons and use one with its author and licence.
+- **US8.5 (Backend) — Built:** As a system, I need the change log written by database triggers (so nothing escapes it), edits allowed only through functions that check the school, and a photo bucket where each school can write only to its own folder.
+- **US8.6 (Kidscover Admin / School Admin) — Built:** As an admin or a school's staff member, I want to set the school's levels by hand when the automatic ones are missing ("Level not stated") or wrong, and hand it back to the automatic levels later, with every change in the change log.
 
 ---
 
 ## Feature 9: Categories — Built
 
-- **US9.1 (Kidscover Admin):** As an admin, I want to see which places the rules put in After-school classes, Colleges or Hidden (with the reason), and move any single place with one click.
-- **US9.2 (Parent):** As a parent, I want After-school classes and Colleges as separate lists, one tap away, with filters that make sense for each.
+- **US9.1 (Kidscover Admin) — Built:** As an admin, I want to see which places the rules put in After-school classes, Colleges or Hidden (with the reason), and move any single place with one click.
+- **US9.2 (Parent) — Built:** As a parent, I want After-school classes and Colleges as separate lists, one tap away, with filters that make sense for each.
 
 ---
 
@@ -129,6 +130,8 @@
 - **US10.3 (Parent) — Built:** As a parent, I want to filter by what my family can spend and sort by lowest cost, and to decide whether schools with no fees listed are shown.
 - **US10.4 (School Admin) — Built:** As a school's staff member, I want to give our fees per level and year, with a note for things like a sibling discount.
 
+---
+
 ## Feature 11: The Kidscover Standard Admission Form — Built
 
 - **US11.1 (Parent) — Built:** As a parent, I want to apply to a school with one form, agreeing in as many words to share my child's details with that school alone.
@@ -137,16 +140,22 @@
 - **US11.4 (Backend) — Built:** As a system, I need each application delivered to a partner school's own system over https, signed with that school's secret, retried on failure, and never sent to an address inside a private network.
 - **US11.5 (School Admin) — Built:** As a school, I want to see how many families went on to our own website or admissions page from Kidscover, without being told who they were.
 
+---
+
 ## Feature 12: Notifications — Built
 
 - **US12.1 (Parent) — Built:** As a parent, I want my phone to tell me when a school replies or my application moves on, in my own language, without putting anything private on my lock screen.
 - **US12.2 (Parent) — Built:** As a parent, I want to switch notifications off.
 
+---
+
 ## Feature 13: The App in My Own Language — Built
 
-- **US13.1 (Parent) — Built:** As a parent, I want to read Kidscover in my own language — any of the 22 languages of the Eighth Schedule, English, or eight international ones — and to choose it before I even sign in.
+- **US13.1 (Parent) — Built:** As a parent, I want to read Kidscover in my own language — any of the 22 languages of the Eighth Schedule, English, or eight international ones — and to choose it before I even sign in. *All 31 are translated; nothing falls back to English.*
 - **US13.2 (Parent) — Built:** As a parent reading Arabic or Urdu, I want the screen laid out right to left.
-- **US13.3 (Parent) — Built:** As a parent, I want my choice remembered with my account, so a new phone speaks my language too.
+- **US13.3 (Parent) — Built:** As a parent, I want my choice remembered with my account, so a new phone speaks my language too — and my notifications in that language as well.
+
+---
 
 ## Feature 14: Security and My Own Data — Built
 
@@ -154,3 +163,21 @@
 - **US14.2 (Parent) — Built:** As a parent, I want to delete my account and everything in it, after proving it is me.
 - **US14.3 (Kidscover Admin) — Built:** As an admin, I want two-step sign-in for the portal, and to require it for everyone who works on families' details.
 - **US14.4 (Backend) — Built:** As a system, I need every right nobody uses taken away from the database roles, so a table added tomorrow is not open by default.
+
+---
+
+## Where the work stands
+
+| | Stories |
+|---|---|
+| Built | 59 |
+| Partly built | 4 — US1.1, US1.3, US1.4 (sign-in methods and dark mode), US2.1 (location fallback) |
+| Not started | 1 — US1.2 (profile picture or avatar) |
+| **Total** | **64** |
+
+**92% built** counting whole stories; **95%** if the four partly-built ones count for half. Every story not fully
+built belongs to Feature 1 (sign-in and personalisation) except one, and none of them blocks a parent from finding a
+school, asking about it, applying to it or hearing back.
+
+What is left is listed in PRD §9. The nearest thing to a gap that matters is not a story at all: the second phase is
+merged but needs its migrations run and its functions deployed before a parent sees any of it (PRD §8).
