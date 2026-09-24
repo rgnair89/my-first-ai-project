@@ -293,6 +293,7 @@ see it, because migrations and edge functions are deployed by hand.
 | Fees, applications, notifications, languages, security, tiles, arrive-by, comparing schools | **Merged.** Needs migrations `20260920000100`–`20260920000600` run in order; `send-push`, `crm-deliver` and `delete-account` deployed; `commute-times` and `read-school-websites` redeployed; the secret `SB_SECRET_KEY` set |
 | A notification actually arriving on a phone | Also needs a Firebase project connected to the EAS build, and ideally `EXPO_ACCESS_TOKEN` |
 | Two-step sign-in required for everyone who works on families' details | Merged; switch it on in the portal's **Security** tab |
+| The profile and the address book (a parent's name, how they are addressed, their picture, and the places they search from) | **Merged.** Needs migrations `20260921000100` and `20260921000200` run |
 | The app on a real phone | Needs an APK from `eas build --platform android --profile preview` |
 
 **None of these is a code change.** Until they are done, the second-phase features exist in main and in the tests, but
