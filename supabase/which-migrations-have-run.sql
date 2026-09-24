@@ -77,7 +77,9 @@ with checks(ord, migration, looks_for, found) as (
          exists (select 1 from information_schema.columns
                  where table_schema = 'public' and table_name = 'profiles' and column_name = 'gender')),
     (27, '20260921000200_parent_addresses',                  'table parent_addresses',
-         to_regclass('public.parent_addresses') is not null)
+         to_regclass('public.parent_addresses') is not null),
+    (28, '20260921000300_people_photos',                      'the people bucket',
+         exists (select 1 from storage.buckets b where b.id = 'people'))
 )
 select
   ord                                                as "#",

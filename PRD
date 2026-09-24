@@ -294,6 +294,7 @@ see it, because migrations and edge functions are deployed by hand.
 | A notification actually arriving on a phone | Also needs a Firebase project connected to the EAS build, and ideally `EXPO_ACCESS_TOKEN` |
 | Two-step sign-in required for everyone who works on families' details | Merged; switch it on in the portal's **Security** tab |
 | The profile and the address book (a parent's name, how they are addressed, their picture, and the places they search from) | **Merged.** Needs migrations `20260921000100` and `20260921000200` run |
+| Photographs of parents and children | **Merged.** Needs migration `20260921000300` run, and `delete-account` deployed so closing an account takes the files with it |
 | The app on a real phone | Needs an APK from `eas build --platform android --profile preview` |
 
 **None of these is a code change.** Until they are done, the second-phase features exist in main and in the tests, but
