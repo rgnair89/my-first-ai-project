@@ -1,0 +1,23 @@
+{
+  "version": "5",
+  "redirects": {
+    "https://esm.sh/@supabase/supabase-js@2": "https://esm.sh/@supabase/supabase-js@2.117.1"
+  },
+  "remote": {
+    "https://esm.sh/@supabase/supabase-js@2.117.1": "99cf17d2470bce11943555fed60fe54cdd642799103df031ace8071b97b5cf78"
+  },
+  "workspace": {
+    "packageJson": {
+      "dependencies": [
+        "npm:@supabase/supabase-js@^2.116.0",
+        "npm:@tailwindcss/postcss@4",
+        "npm:eslint-config-next@16.3.5",
+        "npm:eslint@9",
+        "npm:next@16.3.5",
+        "npm:react-dom@19.2.3",
+        "npm:react@19.2.3",
+        "npm:tailwindcss@4"
+      ]
+    }
+  }
+}

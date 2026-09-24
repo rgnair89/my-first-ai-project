@@ -10,9 +10,11 @@
 //      connected to the Expo build; see the README in the app repository.
 //   4. Optional but recommended: in expo.dev, switch on "Enhanced Security for Push Notifications", make an access
 //      token, and set it here as the secret EXPO_ACCESS_TOKEN.
+//   5. Run supabase/migrations/20260925000100_send_push_schedule.sql, which asks Postgres to call this once a minute.
+//      Without that nothing calls it, the queue fills up, and the phones stay quiet however well everything else is set.
 //
-// Who may call it: a Kidscover admin or a school's own staff (the portal calls it right after a reply or a change of
-// stage), or a scheduled job presenting the secret key itself.
+// Who may call it: the scheduled job, presenting the secret key itself - that is how it is normally called - or a
+// Kidscover admin or a school's own staff, signed in.
 //
 // What a phone shows: "<school name>" and one short line - that the school replied, or which stage an application
 // reached. Never the words of a message: a locked screen is not a private place.
@@ -404,8 +406,12 @@ function pushMessage(row: any): any | null {
     title,
     body,
     sound: "default",
+    // "default" is the channel the app makes for itself when it registers, so these arrive as Kidscover's own
+    // notifications and a person can turn them down without turning down everything else.
     channelId: "default",
-    priority: "default",
+    // High, because a phone left alone holds ordinary notifications back until it next wakes - sometimes for hours.
+    // These are rare and always wanted: a school has written back, or an application has moved on.
+    priority: "high",
     data: { kind: row.kind, notificationId: row.notification_id },
   };
 }
