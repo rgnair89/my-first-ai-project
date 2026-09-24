@@ -72,7 +72,10 @@ with checks(ord, migration, looks_for, found) as (
          to_regclass('public.security_settings') is not null),
     (25, '20260920000600_privileges_tightened',              'anon can no longer write to schools',
          to_regclass('public.schools') is not null
-           and not has_table_privilege('anon', 'public.schools', 'INSERT'))
+           and not has_table_privilege('anon', 'public.schools', 'INSERT')),
+    (26, '20260921000100_profile_gender_and_avatar',        'profiles.gender',
+         exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = 'profiles' and column_name = 'gender'))
 )
 select
   ord                                                as "#",
