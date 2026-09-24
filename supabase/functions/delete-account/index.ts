@@ -4,7 +4,8 @@
 // Self-contained: paste this whole file into the dashboard editor as a new function called "delete-account".
 //
 // Before it can work (once):
-//   1. Run supabase/migrations/20260920000500_account_and_security.sql in the SQL editor.
+//   1. Run supabase/migrations/20260920000500_account_and_security.sql in the SQL editor (and 20260921000300 if
+//      you want photographs taken away with the account, which you do).
 //   2. Set the secret SB_SECRET_KEY to a Supabase secret key (sb_secret_...). Removing a sign-in needs it.
 //
 // Request (POST, from the signed-in app): no body.
@@ -58,6 +59,16 @@ function createHandler(deps: Deps) {
       const user = who?.user;
       if (whoErr || !user) return json({ ok: false, code: "sign_in" }, 401);
 
+      // their photographs, while they can still say which are theirs. Deleting the rows would leave the files
+      // behind, so they are named here and taken away with the secret key below.
+      let photos: string[] = [];
+      try {
+        const { data: mine } = await asUser.rpc("my_photo_paths");
+        photos = (mine ?? []).map((row: { path?: string }) => row?.path ?? "").filter(Boolean);
+      } catch (_err) {
+        photos = [];   // an older database has no photographs to take away
+      }
+
       const { error: dataErr } = await asUser.rpc("delete_my_account_data");
       if (dataErr) {
         const msg = String(dataErr.message ?? "");
@@ -66,8 +77,15 @@ function createHandler(deps: Deps) {
         return json({ ok: false, code: "failed" });
       }
 
-      // and only then, with the secret key, the sign-in itself
+      // and only then, with the secret key, the files and the sign-in itself
       const admin = deps.createClient(url, secretKey, { auth: { persistSession: false } });
+      if (photos.length) {
+        try {
+          await admin.storage.from("people").remove(photos);
+        } catch (_err) {
+          // a photograph left behind is not a reason to leave the account standing; the rows are already gone
+        }
+      }
       const { error: delErr } = await admin.auth.admin.deleteUser(user.id);
       if (delErr) return json({ ok: false, code: "failed" });
       return json({ ok: true });
