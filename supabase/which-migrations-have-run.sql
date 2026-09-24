@@ -75,7 +75,9 @@ with checks(ord, migration, looks_for, found) as (
            and not has_table_privilege('anon', 'public.schools', 'INSERT')),
     (26, '20260921000100_profile_gender_and_avatar',        'profiles.gender',
          exists (select 1 from information_schema.columns
-                 where table_schema = 'public' and table_name = 'profiles' and column_name = 'gender'))
+                 where table_schema = 'public' and table_name = 'profiles' and column_name = 'gender')),
+    (27, '20260921000200_parent_addresses',                  'table parent_addresses',
+         to_regclass('public.parent_addresses') is not null)
 )
 select
   ord                                                as "#",
