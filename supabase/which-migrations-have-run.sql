@@ -79,7 +79,12 @@ with checks(ord, migration, looks_for, found) as (
     (27, '20260921000200_parent_addresses',                  'table parent_addresses',
          to_regclass('public.parent_addresses') is not null),
     (28, '20260921000300_people_photos',                      'the people bucket',
-         exists (select 1 from storage.buckets b where b.id = 'people'))
+         exists (select 1 from storage.buckets b where b.id = 'people')),
+    -- The job itself lives in cron.job, which cannot be read here unless pg_cron is on, so this looks for the two
+    -- extensions it needs. To see the jobs themselves: select jobname, schedule, active from cron.job;
+    (29, '20260925000100_send_push_schedule',                 'pg_cron and pg_net switched on',
+         exists (select 1 from pg_extension where extname = 'pg_cron')
+           and exists (select 1 from pg_extension where extname = 'pg_net'))
 )
 select
   ord                                                as "#",
