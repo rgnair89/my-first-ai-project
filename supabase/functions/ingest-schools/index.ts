@@ -322,12 +322,19 @@ function chunks<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
-async function loadSchools(db: any): Promise<SchoolRow[]> {
+// The schools already held for one city.
+//
+// It used to load every school in the database. On a Mumbai sweep that was the same thing; on a six-cell trial of
+// Pune it meant 4,975 Mumbai schools were compared against 204 Pune ones and reported as "stored but unmatched",
+// which is true and useless. Worse, the duplicate check then looks for a Pune school with the same name as a Mumbai
+// one - and there is a Podar International School in both.
+async function loadSchools(db: any, city: string): Promise<SchoolRow[]> {
   const rows: SchoolRow[] = [];
   for (let from = 0; ; from += 1000) {
     const { data, error } = await db
       .from("schools")
       .select("id, name, latitude, longitude, website, google_place_id")
+      .eq("city", city)
       .order("id")
       .range(from, from + 999);
     if (error) throw new Error(`could not read schools: ${error.message}`);
@@ -389,7 +396,7 @@ function createHandler(deps: Deps) {
       const googleKey = deps.env.get("GOOGLE_MAPS_API_KEY") ?? "";
       if (!googleKey) return json({ error: "GOOGLE_MAPS_API_KEY secret is missing in Supabase." }, 400);
 
-      const known = await loadSchools(db);
+      const known = await loadSchools(db, area.key);
       const byPlaceId = new Map<string, SchoolRow>();
       const legacy: SchoolRow[] = [];
       for (const r of known) (r.google_place_id ? byPlaceId.set(r.google_place_id, r) : legacy.push(r));
