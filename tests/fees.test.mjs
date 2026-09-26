@@ -264,6 +264,65 @@ console.log('\n=== the class written above the table, not in it ===');
     L.readFeePage(page, 'https://x.in/f')[0]?.confidence === 'low');
 }
 
+// =================================================================================================================
+// Two real Mumbai fee tables, copied cell for cell off the pages themselves. Between them they read 52 lines and
+// produced nothing anybody could trust, for two different reasons.
+console.log('\n=== two real fee tables ===');
+{
+  // orchidsinternationalschool.com/fee-structure - a class on every row, and the charge named only by its period.
+  // "Monthly Fees" never matched, because the pattern was "monthly fee" with a word boundary after it, and the
+  // page says fees. A plural cost 28 lines.
+  const orchids = { tables: [{ heading: '', rows: [
+    ['Class', 'Monthly Fees (\u20B9)', 'Annual Fees (\u20B9)'],
+    ['Pre Nursery', '9,167', '1,10,000'],
+    ['Grade I', '11,667', '1,40,000'],
+    ['Grade IX', '15,000', '1,80,000'],
+  ] }], lines: [], text: '' };
+  const got = L.readFeePage(orchids, 'https://x.in/f');
+  check('a class on every row and a column headed only with a period reads in full',
+    got.length === 6 && got.every((f) => f.confidence === 'high' && f.component === 'tuition'),
+    JSON.stringify(got.map((f) => [f.level, f.component, f.confidence])));
+  check('...with each class placed where it belongs',
+    got.map((f) => f.level).join() === 'preschool,preschool,primary,primary,secondary,secondary', got.map((f) => f.level).join());
+  check('...and both the monthly and the yearly figure kept, for a person to choose between',
+    got.filter((f) => f.amount === 9167).length === 1 && got.filter((f) => f.amount === 110000).length === 1);
+}
+check('a plural is still the same word: "Monthly Fees" is what pages actually say',
+  L.componentFrom('Monthly Fees (\u20B9)') === 'tuition' && L.componentFrom('Annual Fees (\u20B9)') === 'tuition'
+  && L.componentFrom('Annual Charges (A+B)') === 'other_annual');
+{
+  // svischool.com - one table per class, each in an accordion, the class written in a plain <div> above it. Nothing
+  // about a heading requires it to be a heading tag, and looking only for h1-h6 found none of them.
+  const svis = { tables: [{ heading: 'Nursery \u25BE', rows: [
+    ['Registration Fee', '\u20B9 500/- (Non Refundable)'],
+    ['Admission Fee (One-Time)', '\u20B9 25,000/- (Non Refundable)'],
+    ['Tuition Fee (A)', '\u20B9 72,000/-'],
+    ['Term Fee (B)', '\u20B9 12,000/-'],
+  ] }], lines: [], text: '' };
+  const got = L.readFeePage(svis, 'https://x.in/f');
+  check('a two-column table whose class is written above it reads in full',
+    got.length === 4 && got.every((f) => f.confidence === 'high' && f.level === 'preschool'),
+    JSON.stringify(got.map((f) => [f.level, f.component, f.confidence])));
+  check('...and the arrow a dropdown leaves on the heading does not stop the class being read',
+    got.every((f) => f.grade_text === 'Nursery \u25BE'), got[0]?.grade_text);
+}
+{
+  // the other shape: one table, with the class written as a row between each block of charges
+  const blocks = { tables: [{ heading: '', rows: [
+    ['Particulars', 'Amount'],
+    ['Nursery', ''],
+    ['Tuition Fee', '\u20B9 60,000/-'],
+    ['Class I to V', ''],
+    ['Tuition Fee', '\u20B9 72,000/-'],
+  ] }], lines: [], text: '' };
+  const got = L.readFeePage(blocks, 'https://x.in/f');
+  check('a class named part way down a table holds for the rows beneath it',
+    got.length === 2 && got[0].level === 'preschool' && got[1].level === 'primary' && got.every((f) => f.confidence === 'high'),
+    JSON.stringify(got.map((f) => [f.grade_text, f.level, f.amount, f.confidence])));
+  check('...so the same charge twice over is told apart by the class it belongs to',
+    got[0].amount === 60000 && got[1].amount === 72000);
+}
+
 console.log('\n=== the tables that are not about money ===');
 check('a CBSE disclosure page is mostly tables, and an affiliation number reads exactly like a fee',
   !L.looksLikeFees([['1', 'Affiliation no.(if applicable)', '1130325'], ['2', 'School code', '30251']]));
