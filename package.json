@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node tests/fees.test.mjs && node tests/fee-findings.test.mjs && node tests/ingest.test.mjs"
+    "test": "node tests/fees.test.mjs && node tests/fee-findings.test.mjs && node tests/ingest.test.mjs && node tests/sweep.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",
