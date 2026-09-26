@@ -63,12 +63,16 @@ export function buildGrid(bounds = SWEEP_BOUNDS, step = STEP) {
   const cells = [];
   for (let i = 0; i < rows; i++) {
     for (let j = 0; j < cols; j++) {
-      cells.push({
-        id: `g${i}-${j}`,
-        depth: 0,
-        low: { lat: r5(bounds.south + i * step), lng: r5(bounds.west + j * step) },
-        high: { lat: r5(bounds.south + (i + 1) * step), lng: r5(bounds.west + (j + 1) * step) },
-      });
+      // Clamped to the city's own edges. Without this the last row and column stick out past the boundary - for
+      // Pune, a hundredth of a degree east of it - and the function refuses every one of them as being outside the
+      // city, which is ten cells of a sweep failing for a reason nobody could see.
+      const low = { lat: r5(bounds.south + i * step), lng: r5(bounds.west + j * step) };
+      const high = {
+        lat: r5(Math.min(bounds.south + (i + 1) * step, bounds.north)),
+        lng: r5(Math.min(bounds.west + (j + 1) * step, bounds.east)),
+      };
+      if (high.lat <= low.lat || high.lng <= low.lng) continue;
+      cells.push({ id: `g${i}-${j}`, depth: 0, low, high });
     }
   }
   return cells;
@@ -91,14 +95,22 @@ export function splitCell(cell) {
   }));
 }
 
-// A handful of cells in the dense Bandra - Andheri - Kurla area, for a cheap trial run before the full sweep.
+// A handful of cells for a cheap trial run before the full sweep.
+//
+// This used to name a window of Mumbai - Bandra to Kurla - which was a reasonable place to look for schools and a
+// terrible way to write it down: pointed at Pune it matched no cells at all, and the trial asked the function to
+// search nothing, which it refused. The middle of a city is where its schools are, whichever city it is.
 export function testCells(grid = buildGrid(), count = BATCH_SIZE) {
-  const inWindow = (c) => {
-    const lat = (c.low.lat + c.high.lat) / 2;
-    const lng = (c.low.lng + c.high.lng) / 2;
-    return lat >= 19.03 && lat <= 19.13 && lng >= 72.82 && lng <= 72.91;
-  };
-  return grid.filter(inWindow).slice(0, count);
+  const cells = Array.isArray(grid) ? grid.filter((c) => c?.low && c?.high) : [];
+  if (cells.length <= count) return cells;
+  const lat = (c) => (c.low.lat + c.high.lat) / 2;
+  const lng = (c) => (c.low.lng + c.high.lng) / 2;
+  const midLat = (Math.min(...cells.map(lat)) + Math.max(...cells.map(lat))) / 2;
+  const midLng = (Math.min(...cells.map(lng)) + Math.max(...cells.map(lng))) / 2;
+  // nearest the middle first, so a trial of six is six cells of city rather than six of coastline
+  return [...cells]
+    .sort((a, b) => ((lat(a) - midLat) ** 2 + (lng(a) - midLng) ** 2) - ((lat(b) - midLat) ** 2 + (lng(b) - midLng) ** 2))
+    .slice(0, count);
 }
 
 // ---- Remembering progress across a page refresh, and refusing to run in two tabs at once ----
