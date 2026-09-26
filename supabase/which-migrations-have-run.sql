@@ -84,7 +84,9 @@ with checks(ord, migration, looks_for, found) as (
     -- extensions it needs. To see the jobs themselves: select jobname, schedule, active from cron.job;
     (29, '20260925000100_send_push_schedule',                 'pg_cron and pg_net switched on',
          exists (select 1 from pg_extension where extname = 'pg_cron')
-           and exists (select 1 from pg_extension where extname = 'pg_net'))
+           and exists (select 1 from pg_extension where extname = 'pg_net')),
+    (30, '20260926000100_fee_findings',                       'table school_fee_findings',
+         to_regclass('public.school_fee_findings') is not null)
 )
 select
   ord                                                as "#",

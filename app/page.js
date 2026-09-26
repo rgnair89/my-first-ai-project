@@ -11,6 +11,7 @@ import CategoriesPanel from './CategoriesPanel';
 import SchoolProfilePanel from './SchoolProfilePanel';
 import ApplicationsPanel from './ApplicationsPanel';
 import SecurityPanel from './SecurityPanel';
+import FeeFindingsPanel from './FeeFindingsPanel';
 import { loadPendingCount } from './reviews-admin';
 import { loadOpenCount } from './enquiries-admin';
 import { loadMySchools } from './profiles-admin';
@@ -298,6 +299,7 @@ function AdminWebDashboard({ profile, level }) {
           { key: 'enquiries', label: `Enquiries (${openEnquiries} need a reply)` },
           { key: 'reviews', label: `Parent reviews (${pendingReviews} waiting)` },
           { key: 'schooldata', label: 'School data' },
+          { key: 'fees', label: 'Fees found on websites' },
           { key: 'categories', label: 'Categories' },
           { key: 'profiles', label: 'School profiles' },
           { key: 'security', label: 'Security' },
@@ -310,6 +312,7 @@ function AdminWebDashboard({ profile, level }) {
       {activeSubTab === 'enquiries' && <EnquiriesPanel onChanged={counts} />}
       {activeSubTab === 'reviews' && <ReviewsPanel onChanged={counts} />}
       {activeSubTab === 'schooldata' && <SiteDataPanel />}
+      {activeSubTab === 'fees' && <FeeFindingsPanel />}
       {activeSubTab === 'categories' && <CategoriesPanel />}
       {activeSubTab === 'profiles' && <SchoolProfilePanel mode="admin" />}
       {activeSubTab === 'security' && <SecurityPanel isAdmin level={level} />}
