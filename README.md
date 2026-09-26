@@ -34,3 +34,21 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Checking it still works
+
+```bash
+npm test          # the logic that has no React and no network in it
+npm run build     # the portal itself compiles
+```
+
+`tests/fees.test.mjs` covers the part of the `crawl-school-fees` edge function that decides what a number on a
+school website means. The function is one file because it is pasted into the Supabase dashboard, so the part worth
+testing is marked off inside it with `==== BEGIN testable logic` and lifted out by the test. Node reads the
+TypeScript directly; nothing needs installing.
+
+`tests/fee-findings.test.mjs` covers the portal side: how those readings are arranged and what stops one being
+saved as a real fee.
+
+Migrations are pasted in by hand, so run `supabase/which-migrations-have-run.sql` in the SQL editor to see which
+ones are already there.
