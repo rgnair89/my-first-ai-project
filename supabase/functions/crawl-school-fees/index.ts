@@ -492,7 +492,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (Array.isArray(body?.schoolIds) && body.schoolIds.length) {
       query = query.in("id", body.schoolIds.slice(0, MAX_SCHOOLS_PER_CALL));
     } else {
-      query = query.order("last_crawled_at", { ascending: true, nullsFirst: true });
+      // A second ordering, so two runs over the same schools read the same schools. Without it every row has
+      // the same null and Postgres may hand them back in any order - which it does after a reset rewrites them,
+      // making one round of measurements incomparable with the next.
+      query = query.order("last_crawled_at", { ascending: true, nullsFirst: true }).order("id", { ascending: true });
     }
 
     const { data: schools, error: fetchErr } = await query.limit(limit);
