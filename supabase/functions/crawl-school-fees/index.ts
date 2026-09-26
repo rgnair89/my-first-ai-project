@@ -98,7 +98,10 @@ const COMPONENTS: Array<[string, RegExp]> = [
   ["uniform_books", /\b(uniform|books|stationer|text\s?books?)\b/],
   ["activities", /\b(activit|sports?|excursion|trip|club|swim|music|dance|gymkhana|lab|computer)/],
   ["other_annual", /\b(development|maintenance|building|infrastructure|miscellaneous|misc|annual\s+charge|general\s+charge|amenit)/],
-  ["tuition", /\b(tuition|academic|composite|school\s+fee|term\s+fee|quarterly|monthly\s+fee|annual\s+fee|session\s+fee|yearly)\b/],
+  // A column headed with nothing but a period - "Monthly", "Annual", "Per Term" - is the tuition for that period.
+  // It is the commonest heading on a class-per-row table, and calling it unknown buried 28 perfectly good lines
+  // off one school: "Grade I | 11,667 | 1,40,000" is the monthly and the yearly figure, and both are tuition.
+  ["tuition", /\b(tuition|academic|composite|school\s+fee|term\s+fee|session\s+fee|monthly|per\s+month|annual|annually|per\s+annum|yearly|per\s+year|quarterly|per\s+term|termly|amount|payable)\b/],
 ];
 
 function componentFrom(text: unknown): string {
@@ -188,8 +191,26 @@ function findingsFromTable(rows: string[][], sourceUrl: string, pageYear: string
 
   const rowYear = academicYearFrom(rows.map((r) => r.join(" ")).join(" ")) ?? pageYear;
 
+  // The class is often written as a row of the table rather than above it: one line saying "Nursery", then that
+  // class's charges, then a line saying "Class I to V", and so on down a single table. Such a row names a class and
+  // carries no money. Remembering it is what tells the rows beneath it who they are about - without it, one table
+  // yields "Tuition Fee" three times over with three different amounts and no way to tell them apart.
+  const isClassRow = (row: string[]) => {
+    const filled = (row ?? []).map((c) => String(c ?? "").trim()).filter((c) => c !== "");
+    if (!filled.length || filled.length > 2) return false;
+    if ((row ?? []).some((c) => amountFrom(c) !== null)) return false;
+    return levelFromGrade(filled[0]) !== null;
+  };
+
+  let saidAbove = String(heading ?? "");
+
   for (const row of body) {
-    if (!Array.isArray(row) || row.length < 2) continue;
+    if (!Array.isArray(row)) continue;
+    if (isClassRow(row)) {
+      saidAbove = (row.map((c) => String(c ?? "").trim()).filter((c) => c !== "")[0]) ?? saidAbove;
+      continue;
+    }
+    if (row.length < 2) continue;
     const label = row[0] ?? "";
     for (let i = 1; i < row.length; i += 1) {
       const amount = amountFrom(row[i]);
@@ -199,10 +220,11 @@ function findingsFromTable(rows: string[][], sourceUrl: string, pageYear: string
       const gradeText = transposed ? headCell : label;
       const componentText = transposed ? label : (componentFrom(headCell) !== "unknown" ? headCell : label);
 
-      // the class from the row if it is there, and from the heading above the table if it is not
+      // the class from the row if it is there, otherwise from the last class named on the way down the table,
+      // otherwise from whatever was written above the table
       const fromRow = levelFromGrade(gradeText);
-      const level = fromRow ?? levelFromGrade(heading);
-      const saidWhere = fromRow ? gradeText : (level ? String(heading ?? "") : gradeText);
+      const level = fromRow ?? levelFromGrade(saidAbove);
+      const saidWhere = fromRow ? gradeText : (level ? saidAbove : gradeText);
       const component = componentFrom(componentText);
       const unsure = level === null || component === "unknown" || gradeSpansLevels(saidWhere);
 
@@ -404,12 +426,7 @@ function pageFromHtml(html: string): { tables: Array<{ rows: string[][]; heading
       if (cells.length) rows.push(cells);
     }
     if (rows.length < 2) continue;
-    // What was written immediately above this table, which is where the class usually is.
-    const above = $(table).find("caption").first().text()
-      || $(table).prevAll("h1, h2, h3, h4, h5, h6, strong, b, p").first().text()
-      || $(table).parent().prevAll("h1, h2, h3, h4, h5, h6, strong, b, p").first().text()
-      || "";
-    tables.push({ rows, heading: above.replace(/\s+/g, " ").trim().slice(0, 160) });
+    tables.push({ rows, heading: headingAbove($, table) });
   }
   const lines: string[] = [];
   for (const el of $("li, p, dd, dt").toArray()) {
@@ -418,6 +435,29 @@ function pageFromHtml(html: string): { tables: Array<{ rows: string[][]; heading
     if (lines.length > 600) break;
   }
   return { tables, lines, text: $("body").text().replace(/\s+/g, " ").trim().slice(0, 20000) };
+}
+
+// What was written above a table, which is where the class usually is.
+//
+// Looking only for h1-h6, strong, b or p missed it on a real school site, where each class's fee table sits in an
+// accordion and the class is a plain <div> - "Nursery" - just outside the wrapper the table lives in. Nothing about
+// a heading requires it to be a heading tag. So: walk outwards and backwards from the table, gather the few short
+// pieces of text written before it, and take the first that actually names a class.
+function headingAbove($: any, table: any): string {
+  const candidates: string[] = [];
+  const add = (text: unknown) => {
+    const v = String(text ?? "").replace(/\s+/g, " ").trim();
+    // A long one is a paragraph or a whole section wrapper, not a heading over a table.
+    if (v && v.length <= 160) candidates.push(v);
+  };
+  add($(table).find("caption").first().text());
+  let node = $(table);
+  for (let up = 0; up < 3 && node && node.length; up += 1) {
+    $(node).prevAll().slice(0, 3).each((_: unknown, el: unknown) => add($(el).text()));
+    node = $(node).parent();
+  }
+  for (const c of candidates) if (levelFromGrade(c)) return c.slice(0, 160);
+  return (candidates[0] ?? "").slice(0, 160);
 }
 
 async function grab(url: string): Promise<string> {
@@ -452,7 +492,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (Array.isArray(body?.schoolIds) && body.schoolIds.length) {
       query = query.in("id", body.schoolIds.slice(0, MAX_SCHOOLS_PER_CALL));
     } else {
-      query = query.order("last_crawled_at", { ascending: true, nullsFirst: true });
+      // A second ordering, so two runs over the same schools read the same schools. Without it every row has
+      // the same null and Postgres may hand them back in any order - which it does after a reset rewrites them,
+      // making one round of measurements incomparable with the next.
+      query = query.order("last_crawled_at", { ascending: true, nullsFirst: true }).order("id", { ascending: true });
     }
 
     const { data: schools, error: fetchErr } = await query.limit(limit);
