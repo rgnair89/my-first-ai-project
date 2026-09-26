@@ -88,7 +88,11 @@ with checks(ord, migration, looks_for, found) as (
     (30, '20260926000100_fee_findings',                       'table school_fee_findings',
          to_regclass('public.school_fee_findings') is not null),
     (31, '20260926000200_fee_crawl_log',                      'table school_fee_crawls',
-         to_regclass('public.school_fee_crawls') is not null)
+         to_regclass('public.school_fee_crawls') is not null),
+    (32, '20260926000300_service_areas',                      'the cities, and schools knowing which one they are in',
+         to_regclass('public.service_areas') is not null
+           and exists (select 1 from information_schema.columns
+                       where table_schema = 'public' and table_name = 'schools' and column_name = 'city'))
 )
 select
   ord                                                as "#",
