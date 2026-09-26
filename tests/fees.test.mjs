@@ -18,7 +18,7 @@ const b = src.indexOf('// ==== END testable logic');
 if (a < 0 || b < 0) throw new Error('the markers are gone from crawl-school-fees/index.ts');
 
 const names = ['tidy', 'levelFromGrade', 'gradeSpansLevels', 'componentFrom', 'amountFrom', 'academicYearFrom',
-  'findingsFromTable', 'findingsFromLines', 'readFeePage', 'bestFeeLink', 'howManySchools', 'dedupe', 'outcomeOf'];
+  'findingsFromTable', 'findingsFromLines', 'readFeePage', 'bestFeeLink', 'howManySchools', 'dedupe', 'outcomeOf', 'headerRowIndex', 'scoreFeeLink'];
 fs.mkdirSync(path.join(here, '.tmp'), { recursive: true });
 const file = path.join(here, '.tmp', 'fee-logic.mts');
 fs.writeFileSync(file, `${src.slice(a, b)}\nexport { ${names.join(', ')} };\n`);
@@ -110,7 +110,31 @@ const classic = [
   const withYear = [['Fee Structure 2027-28', '', ''], ...classic];
   const got = L.findingsFromTable(withYear, 'https://school.in/fees', '2026-27');
   check('a year printed inside the table beats the one on the rest of the page', got.every((f) => f.academic_year === '2027-28'), got[0]?.academic_year);
+  // This fixture was here from the start and only ever asked about the year. It was quietly failing the far more
+  // important question, and 96 lines were read off real school websites and marked untrustworthy before anybody
+  // asked it: a title line above the headings was being read as the headings.
+  check('...and a title line above the headings does not cost every column its name',
+    got.length === 9 && got.every((f) => f.confidence === 'high'),
+    JSON.stringify(got.slice(0, 2).map((f) => [f.grade_text, f.component, f.confidence])));
 }
+{
+  const twoTitles = [['Fee Structure'], ['2026-27'], ...classic];
+  const got = L.findingsFromTable(twoTitles, 'https://school.in/fees', null);
+  check('...nor do two of them', got.length === 9 && got.every((f) => f.confidence === 'high'), String(got.filter((f) => f.confidence === 'high').length));
+}
+console.log('\n=== finding the headings ===');
+check('the headings are the first row with more than one thing on it and no money in it',
+  L.headerRowIndex([['Fee Structure 2026-27'], ['Class', 'Tuition'], ['Nursery', '45,000']]) === 1);
+check('...the first row, when that is what they are', L.headerRowIndex([['Class', 'Tuition'], ['Nursery', '45,000']]) === 0);
+check('...and a table that starts straight into figures has none, rather than losing its first row to the pretence',
+  L.headerRowIndex([['Nursery', '45,000'], ['Class I', '55,000']]) === -1);
+{
+  const noHead = [['Nursery', '45,000'], ['Class I - V', '55,000']];
+  const got = L.findingsFromTable(noHead, 'https://x.in/f', null);
+  check('...so every row of it is read, including the first', got.length === 2 && got[0].amount === 45000, JSON.stringify(got.map((f) => f.amount)));
+}
+check('a title so long it is the whole table is not mistaken for headings',
+  L.headerRowIndex([['Fee Structure for the academic year 2026-27'], ['Class', 'Tuition'], ['Nursery', '45,000']]) === 1);
 
 console.log('\n=== the same table, the other way round ===');
 {
@@ -193,6 +217,43 @@ check('a site that could not be read is counted as that, and not as a school wit
   L.outcomeOf({ failed: true, found: 0 }) === 'failed'
   && L.outcomeOf({ failed: true, found: 3, feePage: 'https://x.in/fees' }) === 'failed');
 check('and nothing at all still gets an answer rather than a crash', L.outcomeOf({}) === 'no_fee_page' && L.outcomeOf(undefined) === 'no_fee_page');
+
+// =================================================================================================================
+// Every link below was really chosen, on a real Mumbai school's website, by a scorer that looked for the letters
+// instead of the word. Following the wrong page is worse than following none: the school then gets recorded as
+// having a fee page and having chosen to put nothing on it, which is a claim about that school that we made up.
+console.log('\n=== the pages that are not fee pages ===');
+const followed = (text, href) => L.scoreFeeLink(text, href) >= 3;
+{
+  const wrong = [
+    ['six of these were picked because "infrastructure" ends in "structure"', 'Infrastructure', 'https://friendsacademy.in/infrastructure/'],
+    ['...including a safety committee page', 'Students Safety and Infrastructure', 'https://canossahighschool.edu.in/about-us/managing-committee/students-safety-and-infrastructure-development-committee'],
+    ['"feedback" begins with "fee" and has nothing to do with money', 'Parents Feedback', 'https://www.risingstarpreprimaryschool.com/parents-feedback'],
+    ['a place to hand over a fee never says what the fee is', 'Pay Fees', 'https://littleleaders.in/pay-fees'],
+    ['...nor does a payment page', 'Payment', 'https://mindseed.in/payment'],
+    ['...nor a bank gateway', 'Online Payment Terms', 'https://stjohnsuniversal.edu.in/admission/online-payment-terms/'],
+    ['a blog post about schools is not a fee page', 'Blog', 'https://www.jbcnschool.edu.in/blog/unveiling-how-the-best-ib-schools-in-mumbai-nurtures-every-learners-potential/'],
+    ['...nor is a list of articles', 'Articles', 'https://branches.narayanaschools.in/locations/mumbai/borivali/narayana-schools-in-borivali-mumbai--4Khwtm/articles'],
+    ['...nor a page of circulars', 'Circulars', 'https://greenlawns.org/GLSW/Circulars.html?ModuleUploadID=2170'],
+    ['an admissions page is about admission, and was being followed for want of anything better', 'Admissions', 'https://www.asbindia.org/join-our-school/admissions'],
+    ['...as was an enquiry form', 'Enquiry', 'http://www.archimedesacademy.co.in/EnquiryForm.asp'],
+  ];
+  for (const [what, text, href] of wrong) check(what, !followed(text, href), `scored ${L.scoreFeeLink(text, href)}`);
+}
+
+console.log('\n=== and the pages that are ===');
+{
+  const right = [
+    ['a page that says fee structure', 'Fee Structure', 'https://school.in/fee-structure'],
+    ['a tuition fee page', 'Tuition Fee', 'https://www.activityinfantschool.com/new-parent-school-tuition-fee.php'],
+    ['a page simply called Fees, however the address is spelled', 'Fees', 'http://www.bsmsmumbai.ac.in/Fees.aspx'],
+    ['...or with no spelling at all', 'Fees', 'https://stmarysicsekk.com/fees'],
+    ['the disclosure every CBSE school must publish, which is where its fees are', 'Mandatory Public Disclosure', 'https://podar.org/school-information'],
+  ];
+  for (const [what, text, href] of right) check(what, followed(text, href), `scored ${L.scoreFeeLink(text, href)}`);
+}
+check('a payment page is followed after all when it says plainly that it carries the fee structure',
+  followed('Fee Structure and Payment', 'https://school.in/fee-structure-payment'), String(L.scoreFeeLink('Fee Structure and Payment', 'https://school.in/fee-structure-payment')));
 
 console.log('\n=== how many schools in one go ===');
 check('a sensible default, and never more than the ceiling, whatever is asked for',
