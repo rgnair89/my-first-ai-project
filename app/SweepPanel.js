@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/utils/supabase';
 import {
   buildGrid, testCells, runSweep, emptyTotals, mergeTotals, serializeState, restoreState,
+  loadSweepCities, sweepSize,
   makeLock, lockedByOtherTab, MAX_REQUESTS, BUDGET_TOP_UP,
 } from './sweep';
 
@@ -23,7 +24,7 @@ function writeStore(key, value) {
 
 // supabase-js sends the signed-in admin's session; the function checks the admin role itself.
 async function invoke(body) {
-  const { data, error } = await supabase.functions.invoke('ingest-mumbai-schools', { body });
+  const { data, error } = await supabase.functions.invoke('ingest-schools', { body });
   if (!error) return { data, error: null };
   const detail = error.context?.text ? await error.context.text().catch(() => '') : '';
   return { data: null, error: { message: `${error.message}${detail ? ` - ${detail}` : ''}` } };
@@ -46,6 +47,11 @@ export default function SweepPanel() {
   const [restored, setRestored] = useState(Boolean(saved && saved.queue.length > 0));
   const [blocked, setBlocked] = useState(false);
   const [trialResult, setTrialResult] = useState('');
+  // Which city this sweep is for. Everything below - the grid, the cells sent, the confirmation - follows from it.
+  const [cities, setCities] = useState([]);
+  const [cityKey, setCityKey] = useState('mumbai');
+  const city = cities.find((c) => c.key === cityKey) ?? null;
+  const size = sweepSize(city?.bounds);
 
   useEffect(() => {
     tabId.current = globalThis.crypto?.randomUUID?.() ?? String(Math.random());
@@ -70,15 +76,19 @@ export default function SweepPanel() {
   }, [running]);
 
   // Called before every batch: tells other tabs that a sweep is running here.
+  useEffect(() => {
+    loadSweepCities(supabase).then((res) => { if (!res.error) setCities(res.rows); });
+  }, []);
+
   async function invokeBatch(body) {
     writeStore(LOCK_KEY, makeLock(tabId.current));
-    return invoke(body);
+    return invoke({ city: cityKey, ...body });
   }
 
   async function trial() {
     setRunning(true);
     setTrialResult('');
-    const { data, error } = await invoke({ dryRun: true, cells: testCells().map(toRequestCell) });
+    const { data, error } = await invoke({ city: cityKey, dryRun: true, cells: testCells(buildGrid(city?.bounds)).map(toRequestCell) });
     setTrialResult(error ? `Error: ${error.message}` : JSON.stringify(data, null, 2));
     setRunning(false);
   }
@@ -94,9 +104,10 @@ export default function SweepPanel() {
     if (
       fresh &&
       !window.confirm(
-        `This starts the full grid sweep of Mumbai, Thane and Navi Mumbai.\n\n` +
-          `Expect roughly 800-1,500 Google Places requests (about $30-55 at Google's list price, and 10-20 minutes). ` +
-          `It stops by itself at ${MAX_REQUESTS} requests (about $70). If the page is refreshed it resumes where it left off.\n\nContinue?`,
+        `This starts the full grid sweep of ${city?.name ?? cityKey}.\n\n` +
+          `${size.cells} cells, so roughly ${size.cells}-${size.cells * 2} Google Places requests ` +
+          `(about $${Math.round(size.cells * 0.035)}-${Math.round(size.cells * 0.07)} at list price). ` +
+          `It stops by itself at ${MAX_REQUESTS} requests. If the page is refreshed it resumes where it left off.\n\nContinue?`,
       )
     ) {
       return;
@@ -107,7 +118,7 @@ export default function SweepPanel() {
       setLimit(budget.current);
     }
     if (fresh) {
-      queue.current = buildGrid();
+      queue.current = buildGrid(city?.bounds);
       done.current = emptyTotals();
       budget.current = MAX_REQUESTS;
       setLimit(MAX_REQUESTS);
@@ -156,11 +167,41 @@ export default function SweepPanel() {
 
   return (
     <div className="bg-white text-gray-900 border border-gray-200 p-6 rounded-xl shadow-sm mb-8">
-      <h2 className="text-lg font-bold text-gray-900 mb-2">Mumbai School Data Pipeline</h2>
+      <h2 className="text-lg font-bold text-gray-900 mb-2">School data pipeline</h2>
       <p className="text-sm text-gray-600 mb-4">
-        Searches Mumbai, Thane and Navi Mumbai on Google Places in small map cells, adds new schools and links existing ones.
-        Try the trial first: it searches {testCells().length} cells in Bandra-Andheri and writes nothing.
+        Searches one city on Google Places in small map cells, adds new schools and links existing ones. A cell that
+        comes back full is split into quarters and searched again, so crowded areas end up covered more finely than
+        empty ones. Try the trial first: it searches a handful of cells and writes nothing.
       </p>
+
+      {/* Which city. The rectangle comes from service_areas, which is the same row the app reads, so a city
+          widened here is widened everywhere. */}
+      <div className="flex flex-wrap items-end gap-3 mb-4">
+        <label className="text-xs font-bold text-gray-700">
+          City to sweep
+          <select
+            data-testid="sweep-city"
+            value={cityKey}
+            onChange={(e) => setCityKey(e.target.value)}
+            disabled={running || left > 0}
+            className="block mt-1 border border-gray-300 rounded px-2 py-1.5 text-sm font-normal disabled:opacity-50"
+          >
+            {cities.map((c) => (
+              <option key={c.key} value={c.key}>{c.name}{c.live ? '' : ' (not shown to parents yet)'}</option>
+            ))}
+          </select>
+        </label>
+        <p className="text-sm text-gray-600" data-testid="sweep-size">
+          {city
+            ? `${size.cells} cells, about ${size.batches} batches. Roughly $${Math.round(size.cells * 0.035)}-${Math.round(size.cells * 0.07)} at Google's list price.`
+            : 'Loading the cities...'}
+        </p>
+        {!!city && !city.live && (
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+            Parents cannot see this city yet. Switch it on in service_areas once the data looks right.
+          </p>
+        )}
+      </div>
 
       <div className="flex flex-wrap gap-3">
         <button

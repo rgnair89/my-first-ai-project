@@ -1,14 +1,31 @@
-// supabase/functions/ingest-mumbai-schools/index.ts
+// supabase/functions/ingest-schools/index.ts
+//
+// Was ingest-mumbai-schools, with eight Mumbai neighbourhoods written into it by hand. It now sweeps any city in
+// service_areas, because the rectangle is in the database and a grid can be worked out from a rectangle. Adding the
+// ninth city is a row, not a rewrite.
 //
 // Self-contained: paste this whole file into the dashboard editor. No other files are needed.
 // Secrets it reads:
 //   GOOGLE_MAPS_API_KEY  required
 //   SB_SECRET_KEY        optional - a Supabase secret key (sb_secret_...). Falls back to the built-in
 //                        SUPABASE_SERVICE_ROLE_KEY, which stops working once legacy keys are disabled.
-// Request body (optional):
-//   { "dryRun": true }   -> reports what would change and writes nothing.
-//   { "cells": [ { "id": "c1", "low": {"lat": 19.05, "lng": 72.82}, "high": {"lat": 19.08, "lng": 72.85} } ] }
-//                        -> searches exactly those rectangles (max 8 per call) instead of the 8 default zones.
+//
+// Before it can work: run supabase/migrations/20260926000300_service_areas.sql.
+//
+// Request body:
+//   { "city": "pune" }              -> says how big the sweep is: how many cells, and how many parts of 8.
+//                                      Costs nothing; it asks Google nothing.
+//   { "city": "pune", "part": 0 }   -> sweeps cells 0 to 7 of that city's grid. Walk part up to sweep it all.
+//   { "city": "pune", "span": 0.02 }-> smaller cells, for a dense city where a cell keeps hitting Google's cap.
+//   { "cells": [ { "id": "c1", "low": {"lat": 18.51, "lng": 73.85 }, "high": {"lat": 18.54, "lng": 73.88} } ] }
+//                                   -> exactly those rectangles, checked against the city's own boundary.
+//   { "dryRun": true }              -> reports what would change and writes nothing.
+//
+// The city defaults to mumbai, so anything that called this before it had cities still works.
+//
+// Every sweep reports which cells were "capped" - filled up Google's 60-result limit, meaning there were more
+// schools in that rectangle than it would hand over. A capped cell is a hole in the sweep: run it again with a
+// smaller span.
 //
 // What it stores: only what Google returns. Anything Google does not provide stays NULL - no guessed
 // ratings, founding years, fees or admission status.
@@ -16,16 +33,14 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ==== BEGIN testable logic (must not use imports or Deno globals) ====
 
-const MUMBAI_ZONES = [
-  { name: "Bandra West Mumbai", latitude: 19.0657, longitude: 72.8383 },
-  { name: "Andheri West Mumbai", latitude: 19.1136, longitude: 72.8335 },
-  { name: "Parel Sewri Mumbai", latitude: 19.0033, longitude: 72.8424 },
-  { name: "Mulund West Mumbai", latitude: 19.1726, longitude: 72.9562 },
-  { name: "Chembur Mumbai", latitude: 19.0625, longitude: 72.9023 },
-  { name: "Oshiwara Andheri Mumbai", latitude: 19.1450, longitude: 72.8340 },
-  { name: "Borivali West Mumbai", latitude: 19.2307, longitude: 72.8567 },
-  { name: "Thane West", latitude: 19.2183, longitude: 72.9781 },
-];
+// A city, as service_areas has it. The app reads the same row, so "what Kidscover covers" is written down once.
+type Area = { key: string; name: string; latMin: number; latMax: number; lngMin: number; lngMax: number };
+
+const CELL_SPAN = 0.03;          // about 3.3 km across - small enough that most cells do not hit Google's 60 cap
+const MIN_SPAN = 0.005;
+const MAX_SPAN = 0.06;
+const MAX_CELLS_PER_CALL = 8;    // one call is one press of a button; a sweep is many presses
+const MAX_CELLS_PER_CITY = 4000; // a guard against a rectangle drawn round half of India
 
 const PLACES_URL = "https://places.googleapis.com/v1/places:searchText";
 const FIELD_MASK =
@@ -247,23 +262,55 @@ function searchBody(region: Region, pageToken?: string) {
   };
 }
 
-// Guard rails on what an admin page may ask for, so a bug or a stray click cannot run up a Google bill:
-// a few small cells per call, inside the Mumbai region only. Returns the cells, or a message describing the problem.
-const CELL_LIMITS = { maxCells: 8, latMin: 18.5, latMax: 19.7, lngMin: 72.5, lngMax: 73.5, maxSpan: 0.06 };
+const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
 
-function parseCells(input: unknown): Cell[] | string {
+function spanOf(input: unknown): number {
+  const n = Number(input);
+  if (!Number.isFinite(n) || n <= 0) return CELL_SPAN;
+  return Math.min(Math.max(n, MIN_SPAN), MAX_SPAN);
+}
+
+// Every cell of a city, west to east and south to north. The order is fixed, which is what lets a sweep be done in
+// parts across many presses and picked up again where it stopped. Steps are counted rather than added up, so the
+// thousandth cell is not half a cell out from rounding.
+function gridFor(area: Area, span?: unknown): Cell[] {
+  const step = spanOf(span);
+  const rows = Math.ceil((area.latMax - area.latMin) / step);
+  const cols = Math.ceil((area.lngMax - area.lngMin) / step);
+  const out: Cell[] = [];
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < cols; c += 1) {
+      const low = { latitude: round6(area.latMin + r * step), longitude: round6(area.lngMin + c * step) };
+      const high = {
+        latitude: round6(Math.min(area.latMin + (r + 1) * step, area.latMax)),
+        longitude: round6(Math.min(area.lngMin + (c + 1) * step, area.lngMax)),
+      };
+      if (high.latitude <= low.latitude || high.longitude <= low.longitude) continue;
+      out.push({ name: `${area.key} ${low.latitude},${low.longitude}`, low, high });
+      if (out.length >= MAX_CELLS_PER_CITY) return out;
+    }
+  }
+  return out;
+}
+
+const partsOf = (cells: number, per = MAX_CELLS_PER_CALL) => Math.max(1, Math.ceil(cells / Math.max(1, per)));
+const cellsForPart = (grid: Cell[], part: number, per = MAX_CELLS_PER_CALL) => grid.slice(part * per, part * per + per);
+
+// Guard rails on what an admin page may ask for, so a bug or a stray click cannot run up a Google bill: a few small
+// cells per call, inside the chosen city and nowhere else. Returns the cells, or a message describing the problem.
+function parseCells(input: unknown, area: Area): Cell[] | string {
   if (!Array.isArray(input)) return "cells must be an array";
-  if (input.length < 1 || input.length > CELL_LIMITS.maxCells) return `send between 1 and ${CELL_LIMITS.maxCells} cells per call`;
+  if (input.length < 1 || input.length > MAX_CELLS_PER_CALL) return `send between 1 and ${MAX_CELLS_PER_CALL} cells per call`;
   const out: Cell[] = [];
   for (const c of input as any[]) {
     const low = { latitude: Number(c?.low?.lat), longitude: Number(c?.low?.lng) };
     const high = { latitude: Number(c?.high?.lat), longitude: Number(c?.high?.lng) };
     if (![low.latitude, low.longitude, high.latitude, high.longitude].every(Number.isFinite)) return "each cell needs numeric low and high lat/lng";
     if (low.latitude >= high.latitude || low.longitude >= high.longitude) return "a cell's low corner must be south-west of its high corner";
-    if (low.latitude < CELL_LIMITS.latMin || high.latitude > CELL_LIMITS.latMax || low.longitude < CELL_LIMITS.lngMin || high.longitude > CELL_LIMITS.lngMax) {
-      return "cell is outside the Mumbai region";
+    if (low.latitude < area.latMin || high.latitude > area.latMax || low.longitude < area.lngMin || high.longitude > area.lngMax) {
+      return `cell is outside ${area.name}`;
     }
-    if (high.latitude - low.latitude > CELL_LIMITS.maxSpan || high.longitude - low.longitude > CELL_LIMITS.maxSpan) return "cell is too large";
+    if (high.latitude - low.latitude > MAX_SPAN || high.longitude - low.longitude > MAX_SPAN) return "cell is too large";
     out.push({ name: String(c?.id ?? `${low.latitude},${low.longitude}`).slice(0, 60), low, high });
   }
   return out;
@@ -303,16 +350,40 @@ function createHandler(deps: Deps) {
       const denied = await requireAdmin(req, db, secretKey);
       if (denied) return denied;
 
-      let body: { dryRun?: boolean; cells?: unknown } = {};
+      let body: { dryRun?: boolean; cells?: unknown; city?: unknown; part?: unknown; span?: unknown } = {};
       try { body = await req.json(); } catch { /* no body */ }
       const dryRun = body?.dryRun === true;
 
-      // No cells: search the original 8 zones. Cells: search exactly those rectangles.
-      let regions: Region[] = MUMBAI_ZONES;
+      // Which city. Mumbai by default, so anything written before this function knew about cities still works.
+      const cityKey = String(body?.city ?? "mumbai").trim().toLowerCase();
+      const area = await loadArea(db, cityKey);
+      if (!area) {
+        return json({ error: `There is no city called "${cityKey}". Add it to service_areas first.` }, 400);
+      }
+
+      const grid = gridFor(area, body?.span);
+      const parts = partsOf(grid.length);
+
+      let regions: Region[];
       if (body?.cells !== undefined) {
-        const parsed = parseCells(body.cells);
+        // exactly these rectangles, checked against this city's own boundary
+        const parsed = parseCells(body.cells, area);
         if (typeof parsed === "string") return json({ error: parsed }, 400);
         regions = parsed;
+      } else if (body?.part === undefined) {
+        // Nobody asked for a sweep yet: say how big one would be. This asks Google nothing and costs nothing, and
+        // is how the panel knows how many times to press the button.
+        return json({
+          ok: true, city: area.key, cityName: area.name, cells: grid.length, parts,
+          span: spanOf(body?.span), swept: false,
+          message: `${area.name} is ${grid.length} cells, or ${parts} part${parts === 1 ? "" : "s"} of ${MAX_CELLS_PER_CALL}.`,
+        });
+      } else {
+        const part = Math.trunc(Number(body.part));
+        if (!Number.isFinite(part) || part < 0 || part >= parts) {
+          return json({ error: `part must be between 0 and ${parts - 1} for ${area.name}` }, 400);
+        }
+        regions = cellsForPart(grid, part);
       }
 
       const googleKey = deps.env.get("GOOGLE_MAPS_API_KEY") ?? "";
@@ -388,6 +459,10 @@ function createHandler(deps: Deps) {
 
       // `legacy` now holds only stored schools this run could not match to a Google result
       const possibleDuplicates = findPossibleDuplicates(toInsert, legacy);
+      // A cell that filled up Google's 60-result limit had more schools in it than Google would hand over, so the
+      // sweep has a hole in it. Naming them is the difference between a gap somebody can close and one nobody knows
+      // about.
+      const cappedCells = zones.filter((z) => z.capped).map((z) => z.zone);
 
       const errors: string[] = [];
       let inserted = 0;
@@ -416,6 +491,12 @@ function createHandler(deps: Deps) {
       return json({
         ok: errors.length === 0,
         dryRun,
+        swept: true,
+        city: area.key,
+        cityName: area.name,
+        parts,
+        part: body?.part === undefined ? null : Math.trunc(Number(body.part)),
+        capped_cells: cappedCells,
         would_insert: toInsert.length,
         would_update: toUpdate.length,
         inserted,
@@ -436,6 +517,22 @@ function createHandler(deps: Deps) {
 }
 
 // ==== END testable logic ====
+
+// The city, as the database has it. One row, read fresh each call, so widening a rectangle takes effect without
+// anybody redeploying anything.
+async function loadArea(db: any, key: string): Promise<Area | null> {
+  const { data, error } = await db.from("service_areas")
+    .select("key,name,lat_min,lat_max,lng_min,lng_max").eq("key", key).maybeSingle();
+  if (error || !data) return null;
+  const area = {
+    key: String(data.key), name: String(data.name),
+    latMin: Number(data.lat_min), latMax: Number(data.lat_max),
+    lngMin: Number(data.lng_min), lngMax: Number(data.lng_max),
+  };
+  const ok = [area.latMin, area.latMax, area.lngMin, area.lngMax].every(Number.isFinite)
+    && area.latMin < area.latMax && area.lngMin < area.lngMax;
+  return ok ? area : null;
+}
 
 Deno.serve(
   createHandler({
