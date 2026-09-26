@@ -47,6 +47,19 @@ const FIELD_MASK =
   "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.websiteUri,places.types,places.primaryType,places.businessStatus,nextPageToken";
 const MAX_PAGES_PER_ZONE = 3; // Google returns at most 20 places per page and 60 per query
 
+// Google fails sometimes, and over a thousand cells it will certainly fail at least once. An INTERNAL or an
+// UNAVAILABLE is weather: wait a moment and it clears. A rejected key or an exhausted quota is a wall, and retrying
+// a wall spends money to be told the same thing. Treating every failure as fatal - which is what this did - means
+// one bad second anywhere in a 1,360-cell sweep of Mumbai kills the whole run.
+const RETRYABLE = ["INTERNAL", "UNAVAILABLE", "DEADLINE_EXCEEDED", "ABORTED", "UNKNOWN"];
+const FATAL = ["PERMISSION_DENIED", "UNAUTHENTICATED", "INVALID_ARGUMENT", "RESOURCE_EXHAUSTED", "FAILED_PRECONDITION"];
+const RETRIES = 2;
+const upper = (s: unknown) => String(s ?? "").toUpperCase();
+const isRetryable = (status: unknown) => RETRYABLE.includes(upper(status));
+// Anything not named is treated as a wall for the run's sake but does not stop the sweep: the cell is reported and
+// the rest carry on. Only the named ones are worth abandoning a whole batch over.
+const isFatal = (status: unknown) => FATAL.includes(upper(status));
+
 // ---- BEGIN admin-auth (identical in every function) ----
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -410,20 +423,40 @@ function createHandler(deps: Deps) {
       let rated = 0;
       let unrated = 0;
 
+      const failedCells: { cell: string; status: string | null; message: string }[] = [];
+
       for (const zone of regions) {
-        const z = { zone: zone.name, pages: 0, fetched: 0, kept: 0, skipped: 0, capped: false };
+        const z = { zone: zone.name, pages: 0, fetched: 0, kept: 0, skipped: 0, capped: false, failed: null as string | null };
         let pageToken: string | undefined;
         let lastPageSize = 0;
 
         for (let page = 0; page < MAX_PAGES_PER_ZONE; page++) {
-          const res = await deps.fetch(PLACES_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Goog-Api-Key": googleKey, "X-Goog-FieldMask": FIELD_MASK },
-            body: JSON.stringify(searchBody(zone, pageToken)),
-          });
-          const data = await res.json();
-          if (data.error) {
-            return json({ ok: false, zone: zone.name, google_error: data.error.message, status: data.error.status }, 502);
+          let data: any = null;
+          let refused: any = null;
+
+          for (let attempt = 0; attempt <= RETRIES; attempt += 1) {
+            const res = await deps.fetch(PLACES_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Goog-Api-Key": googleKey, "X-Goog-FieldMask": FIELD_MASK },
+              body: JSON.stringify(searchBody(zone, pageToken)),
+            });
+            data = await res.json();
+            refused = data?.error ?? null;
+            if (!refused) break;
+            // A wall: stop the whole run and say so, rather than working through a thousand cells being refused.
+            if (isFatal(refused.status)) {
+              return json({ ok: false, zone: zone.name, google_error: refused.message, status: refused.status }, 502);
+            }
+            if (!isRetryable(refused.status) || attempt === RETRIES) break;
+            await deps.sleep(600 * (attempt + 1));
+          }
+
+          if (refused) {
+            // This cell is lost, and that is a hole of about three kilometres. The rest of the sweep is not lost
+            // with it: the cell is named in the answer so it can be run again.
+            z.failed = upper(refused.status) || "ERROR";
+            failedCells.push({ cell: zone.name, status: refused.status ?? null, message: String(refused.message ?? "").slice(0, 200) });
+            break;
           }
           z.pages++;
           lastPageSize = (data.places ?? []).length;
@@ -504,6 +537,9 @@ function createHandler(deps: Deps) {
         parts,
         part: body?.part === undefined ? null : Math.trunc(Number(body.part)),
         capped_cells: cappedCells,
+        // Named so they can be swept again. A lost cell is a hole of about three kilometres, and one nobody is
+        // told about is one nobody closes.
+        failed_cells: failedCells,
         would_insert: toInsert.length,
         would_update: toUpdate.length,
         inserted,

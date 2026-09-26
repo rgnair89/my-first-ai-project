@@ -15,7 +15,7 @@ const b = src.indexOf('// ==== END testable logic');
 if (a < 0 || b < 0) throw new Error('the markers are gone from ingest-schools/index.ts');
 
 const names = ['gridFor', 'partsOf', 'cellsForPart', 'parseCells', 'spanOf', 'searchBody',
-  'MAX_CELLS_PER_CALL', 'CELL_SPAN', 'MAX_SPAN', 'MIN_SPAN'];
+  'MAX_CELLS_PER_CALL', 'CELL_SPAN', 'MAX_SPAN', 'MIN_SPAN', 'isRetryable', 'isFatal', 'RETRIES'];
 fs.mkdirSync(path.join(here, '.tmp'), { recursive: true });
 const file = path.join(here, '.tmp', 'ingest-logic.mts');
 fs.writeFileSync(file, `${src.slice(a, b)}\nexport { ${names.join(', ')} };\n`);
@@ -86,6 +86,21 @@ console.log('\n=== sweeping it a part at a time ===');
     Array.from({ length: parts }, (_, i) => L.cellsForPart(grid, i)).flat().length === grid.length);
   check('a city smaller than one part is still one part, not none', L.partsOf(3) === 1 && L.partsOf(0) === 1);
 }
+
+console.log('\n=== when Google has a bad second ===');
+// This is not hypothetical. A real Mumbai sweep died on cell g24-15 with INTERNAL: "Internal server error. Please
+// retry." Every Google failure was being treated as fatal, so one bad second anywhere in 1,360 cells ended the run.
+check('the errors Google tells you to retry are retried',
+  ['INTERNAL', 'UNAVAILABLE', 'DEADLINE_EXCEEDED', 'ABORTED', 'UNKNOWN'].every((e) => L.isRetryable(e)));
+check('...however they are capitalised, because a status is not worth arguing with',
+  L.isRetryable('internal') && L.isRetryable('Unavailable'));
+check('...and they are not treated as walls', !['INTERNAL', 'UNAVAILABLE', 'DEADLINE_EXCEEDED'].some((e) => L.isFatal(e)));
+check('a refused key or an exhausted quota is a wall: retrying it spends money to be told the same thing',
+  ['PERMISSION_DENIED', 'UNAUTHENTICATED', 'INVALID_ARGUMENT', 'RESOURCE_EXHAUSTED', 'FAILED_PRECONDITION'].every((e) => L.isFatal(e)));
+check('...and a wall is never retried', !['PERMISSION_DENIED', 'RESOURCE_EXHAUSTED'].some((e) => L.isRetryable(e)));
+check('something nobody has seen before is neither retried nor allowed to end the run: the cell is lost, the sweep goes on',
+  !L.isRetryable('SOMETHING_NEW') && !L.isFatal('SOMETHING_NEW') && !L.isRetryable(null) && !L.isFatal(undefined));
+check('a bad second is tried again more than once, because two in a row happens', L.RETRIES >= 2);
 
 console.log('\n=== what an admin page is allowed to ask for ===');
 {
