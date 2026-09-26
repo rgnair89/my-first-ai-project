@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/utils/supabase';
 import {
   LEVELS, PARTS, loadWaitingSchools, loadFindings, groupByLevel, draftFromFindings, whyNotYet,
-  acceptFindings, rejectFindings, readMoreWebsites, crawlSummary, rupees, levelLabel,
+  acceptFindings, rejectFindings, readMoreWebsites, crawlSummary, crawlNeedsAttention, rupees, levelLabel,
 } from './fee-findings-admin';
 
 export default function FeeFindingsPanel() {
@@ -83,7 +83,9 @@ export default function FeeFindingsPanel() {
     const res = await readMoreWebsites(supabase, { limit: 8 });
     setBusy('');
     if (res.error) { setError(res.error.message); return; }
-    setNotice(crawlSummary(res.result));
+    // A run that needs somebody to do something is not good news, and is not shown as good news.
+    if (crawlNeedsAttention(res.result)) setError(crawlSummary(res.result));
+    else setNotice(crawlSummary(res.result));
     await refresh();
   }
 
