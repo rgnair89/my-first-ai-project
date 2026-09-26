@@ -18,7 +18,7 @@ const b = src.indexOf('// ==== END testable logic');
 if (a < 0 || b < 0) throw new Error('the markers are gone from crawl-school-fees/index.ts');
 
 const names = ['tidy', 'levelFromGrade', 'gradeSpansLevels', 'componentFrom', 'amountFrom', 'academicYearFrom',
-  'findingsFromTable', 'findingsFromLines', 'readFeePage', 'bestFeeLink', 'howManySchools', 'dedupe', 'outcomeOf', 'headerRowIndex', 'scoreFeeLink'];
+  'findingsFromTable', 'findingsFromLines', 'readFeePage', 'bestFeeLink', 'howManySchools', 'dedupe', 'outcomeOf', 'headerRowIndex', 'scoreFeeLink', 'looksLikeFees'];
 fs.mkdirSync(path.join(here, '.tmp'), { recursive: true });
 const file = path.join(here, '.tmp', 'fee-logic.mts');
 fs.writeFileSync(file, `${src.slice(a, b)}\nexport { ${names.join(', ')} };\n`);
@@ -222,6 +222,71 @@ check('and nothing at all still gets an answer rather than a crash', L.outcomeOf
 // Every link below was really chosen, on a real Mumbai school's website, by a scorer that looked for the letters
 // instead of the word. Following the wrong page is worse than following none: the school then gets recorded as
 // having a fee page and having chosen to put nothing on it, which is a claim about that school that we made up.
+// =================================================================================================================
+// Every fixture below is a row this crawler really read off a Mumbai school's website, and got wrong.
+console.log('\n=== the class written above the table, not in it ===');
+{
+  // The commonest fee table in India: two columns, one table per class, and the class in a heading above it.
+  // Reading only what was inside the table left all 52 lines off nine real fee tables with no class at all.
+  const page = {
+    tables: [{
+      heading: 'Nursery',
+      rows: [
+        ['Registration Fee', '\u20B9 500/- (Non Refundable)'],
+        ['Tuition Fee (A)', '\u20B9 60,000/-'],
+        ['Term Fee (B)', '\u20B9 10,000/-'],
+        ['Gymkhana Fee (C)', '\u20B9 6,500/-'],
+        ['Annual Charges (A+B)', '\u20B9 70,000/-'],
+        ['Admission Fee (One-Time)', '\u20B9 25,000/- (Non Refundable)'],
+      ],
+    }],
+    lines: [],
+    text: 'Fee Structure 2026-27',
+  };
+  const got = L.readFeePage(page, 'https://school.in/fees');
+  check('a two-column table with the class above it is read, and read confidently',
+    got.length === 6 && got.every((f) => f.confidence === 'high' && f.level === 'preschool'),
+    JSON.stringify(got.map((f) => [f.level, f.component, f.confidence])));
+  check('...with each charge named for what it is',
+    got.map((f) => f.component).join() === 'registration_fee,tuition,tuition,activities,other_annual,admission_fee',
+    got.map((f) => f.component).join());
+  check('...a gymkhana being an activity, not a mystery', got.find((f) => f.amount === 6500)?.component === 'activities');
+  check('...and the heading kept as what was read, so a person can see where the class came from',
+    got.every((f) => f.grade_text === 'Nursery'), got[0]?.grade_text);
+}
+{
+  const page = { tables: [{ heading: 'Class VIII to X', rows: [['Tuition Fee', '\u20B9 90,000/-']] }], lines: [], text: '' };
+  check('a heading naming older classes places them just as well', L.readFeePage(page, 'https://x.in/f')[0]?.level === 'secondary');
+}
+{
+  const page = { tables: [{ heading: 'Our Fee Policy', rows: [['Tuition Fee', '\u20B9 90,000/-']] }], lines: [], text: '' };
+  check('...and a heading that names no class leaves the line unsure, rather than inventing one',
+    L.readFeePage(page, 'https://x.in/f')[0]?.confidence === 'low');
+}
+
+console.log('\n=== the tables that are not about money ===');
+check('a CBSE disclosure page is mostly tables, and an affiliation number reads exactly like a fee',
+  !L.looksLikeFees([['1', 'Affiliation no.(if applicable)', '1130325'], ['2', 'School code', '30251']]));
+check('...as does a campus area in square metres', !L.looksLikeFees([['1', 'Total campus area of the school (in sq mtr)', '4887.05 sq. mtr.']]));
+check('...and a board results table', !L.looksLikeFees([['1', '2024-25', '361', '360', '100%', '-']]));
+check('a table that says so is about fees', L.looksLikeFees([['Class', 'Tuition Fee'], ['Nursery', '45,000']])
+  && L.looksLikeFees([['Registration Fee', '\u20B9 500/-']]));
+
+console.log('\n=== the sentences that are not about money ===');
+{
+  const notFees = [
+    'The Student Scoop Floor P-1/13-Raj Rahul Building, Hatkesh Society, Juhu, Mumbai - 400049',
+    'U. S CLUB, 14/4 MAGDALA HOUSE, NEAR R. C CHURCH, Mumbai, Maharashtra, India - 400005',
+  ];
+  check('an address ending in a pincode is not a charge of four lakh',
+    notFees.every((line) => L.findingsFromLines([line], 'https://x.in', null).length === 0),
+    JSON.stringify(L.findingsFromLines(notFees, 'https://x.in', null)));
+  check('"BOOK A SESSION" is not a charge for textbooks',
+    L.findingsFromLines(['BOOK A SESSIONRs.800 - 1000Rs.800 - 1000Book Now'], 'https://x.in', null).length === 0);
+  check('...and a sentence that really does name a fee is still read',
+    L.findingsFromLines(['Tuition Fee: Rs. 45,000 per annum'], 'https://x.in', null).length === 1);
+}
+
 console.log('\n=== the pages that are not fee pages ===');
 const followed = (text, href) => L.scoreFeeLink(text, href) >= 3;
 {
