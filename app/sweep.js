@@ -1,10 +1,39 @@
-// Logic for the Mumbai grid sweep. No React and no network calls here, so it can be tested on its own.
+// Logic for the grid sweep. No React and no network calls here, so it can be tested on its own.
 //
-// The sweep covers Mumbai, Thane and Navi Mumbai with small map cells. Each cell is one Google search that can
-// return at most 60 places; a cell that returns a full 60 is split into four quarters and searched again, so
-// crowded areas are covered in finer detail.
+// A sweep covers one city with small map cells. Each cell is one Google search that can return at most 60 places; a
+// cell that comes back with a full 60 is split into four quarters and searched again, so crowded areas end up
+// covered in finer detail than empty ones.
+//
+// The rectangle used to be written here, and in App.js, and in commute-times: three copies of one fact. It now comes
+// from service_areas, which is also what the app reads, so widening a city happens in one place.
 
+// Only a fallback, for a screen that has somehow not been told which city it is sweeping. Mumbai's original sweep
+// rectangle, which is tighter than its service area: the service area says who is inside, this says where to look.
 export const SWEEP_BOUNDS = { south: 18.88, north: 19.32, west: 72.76, east: 73.2 };
+
+// A city row from service_areas, as the corners a grid is built from.
+export function boundsOf(area) {
+  const n = (v) => (v === null || v === undefined || v === '' ? NaN : Number(v));
+  const b = { south: n(area?.lat_min), north: n(area?.lat_max), west: n(area?.lng_min), east: n(area?.lng_max) };
+  const ok = Object.values(b).every(Number.isFinite) && b.south < b.north && b.west < b.east;
+  return ok ? b : null;
+}
+
+// Every city, including the ones not yet shown to parents - sweeping one is how it stops being empty.
+export async function loadSweepCities(db) {
+  const { data, error } = await db.from('service_areas')
+    .select('key,name,lat_min,lat_max,lng_min,lng_max,live,sort_order').order('sort_order', { ascending: true });
+  if (error) return { rows: [], error };
+  const rows = (data ?? []).map((a) => ({ key: a.key, name: a.name, live: !!a.live, bounds: boundsOf(a) }))
+    .filter((c) => c.key && c.name && c.bounds);
+  return { rows, error: null };
+}
+
+// How big a sweep would be, before anybody spends anything on it.
+export function sweepSize(bounds, step = STEP) {
+  const cells = buildGrid(bounds, step).length;
+  return { cells, batches: Math.ceil(cells / BATCH_SIZE) };
+}
 export const STEP = 0.03; // about 3.3 km
 export const BATCH_SIZE = 6; // cells per function call (the function accepts at most 8)
 export const MAX_DEPTH = 3; // a crowded cell is split into quarters at most 3 times (about 400 m)
