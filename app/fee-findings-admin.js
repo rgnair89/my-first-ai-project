@@ -147,9 +147,26 @@ export async function readMoreWebsites(db, { limit = 8, dryRun = false } = {}) {
   return { result: data, error: null };
 }
 
+// The crawler before this one answered in a different shape: { mode: 'report-only...', count, details } and no
+// "schools" at all. A portal that simply read result.schools saw nothing there, read it as a nought, and announced
+// that there was nothing to read - while the function it was talking to had just read five websites and said so.
+// So: recognise the old one by name and say what it is, and never turn an answer you do not understand into a
+// confident sentence about what happened.
+export function isOldCrawler(result) {
+  return !!result && result.schools === undefined && (typeof result.count === 'number' || /report-only/i.test(String(result.mode ?? '')));
+}
+
 // A line of plain English about what a run of the crawler did.
 export function crawlSummary(result) {
   if (!result) return '';
+  if (isOldCrawler(result)) {
+    return 'That is the old crawler, which only reports and never writes anything down. Paste the new '
+      + 'crawl-school-fees into the dashboard and deploy it, then try again.';
+  }
+  if (result.schools === undefined) {
+    // something answered, but not in a shape this screen knows. Say so, and hand over its own words.
+    return `The crawler answered in a way this screen does not recognise${result.message ? `: ${result.message}` : '.'}`;
+  }
   const schools = Number(result.schools ?? 0);
   const found = Number(result.findings_written ?? 0);
   const worth = Number(result.worth_looking_at ?? 0);
@@ -158,3 +175,6 @@ export function crawlSummary(result) {
   return `Read ${schools} website${schools === 1 ? '' : 's'}, took down ${found} line${found === 1 ? '' : 's'}, `
     + `${worth} of them worth looking at.`;
 }
+
+// True when the run needs somebody to do something before it will work, rather than simply having found nothing.
+export const crawlNeedsAttention = (result) => isOldCrawler(result) || (!!result && result.schools === undefined);

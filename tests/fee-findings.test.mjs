@@ -127,6 +127,17 @@ console.log('\n=== reading more websites ===');
   check('...and what it did is said in plain words',
     L.crawlSummary(res.result) === 'Read 8 websites, took down 22 lines, 14 of them worth looking at.', L.crawlSummary(res.result));
 }
+check('the crawler that only reports is recognised by its answer, and named, instead of being read as silence',
+  L.isOldCrawler({ success: true, mode: 'report-only (nothing written to school_fees)', count: 5, details: [] })
+  && /old crawler/.test(L.crawlSummary({ success: true, mode: 'report-only', count: 5 })),
+  L.crawlSummary({ success: true, mode: 'report-only', count: 5 }));
+check('...and that is a thing to fix, not a result to celebrate', L.crawlNeedsAttention({ mode: 'report-only', count: 5 }) === true);
+check('an answer in a shape this screen has never seen is said to be exactly that, with the words it came with',
+  /does not recognise: teapot/.test(L.crawlSummary({ success: true, message: 'teapot' })), L.crawlSummary({ success: true, message: 'teapot' }));
+check('...rather than being turned into a confident sentence about nothing having happened',
+  L.crawlSummary({ success: true, message: 'teapot' }) !== 'No schools with a website were left to read.');
+check('and the new crawler saying a true nought is still a true nought, not a problem',
+  L.crawlSummary({ schools: 0 }) === 'No schools with a website were left to read.' && L.crawlNeedsAttention({ schools: 0 }) === false);
 check('a run that found nothing says so, without pretending', L.crawlSummary({ schools: 5, findings_written: 0 }) === 'Read 5 websites and found no fee table on any of them.');
 check('...and one with nothing left to read says that instead', L.crawlSummary({ schools: 0 }) === 'No schools with a website were left to read.');
 {
