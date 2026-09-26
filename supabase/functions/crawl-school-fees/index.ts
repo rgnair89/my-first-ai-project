@@ -136,12 +136,32 @@ function academicYearFrom(text: unknown): string | null {
 // ---- turning one table into findings ----------------------------------------------------------------------------
 // `rows` is the table as plain strings. Two shapes are common on school sites and both are handled: classes down the
 // side with what the money is for across the top, and the other way round.
+// Which row holds the column headings.
+//
+// Assuming it is the first row is wrong on most real fee tables, because they open with a title line - "Fee
+// Structure 2026-27", spanning the width - above the headings. Reading that as the headings leaves every column
+// unnamed, and then every figure on the table comes out as a number nobody can say anything about. That is exactly
+// what happened to the first 96 lines this crawler read: not one of them could be trusted.
+//
+// The headings are the first row near the top with more than one thing written on it and no money in it.
+function headerRowIndex(rows: string[][]): number {
+  const look = Math.min(rows.length - 1, 4);
+  for (let i = 0; i < look; i += 1) {
+    const row = rows[i] ?? [];
+    if (row.filter((c) => String(c ?? "").trim() !== "").length < 2) continue;   // a title across the table
+    if (row.some((c) => amountFrom(c) !== null)) continue;                        // already a row of figures
+    return i;
+  }
+  return -1;   // no headings at all: every row is a row of the table
+}
+
 function findingsFromTable(rows: string[][], sourceUrl: string, pageYear: string | null): any[] {
   const out: any[] = [];
   if (!Array.isArray(rows) || rows.length < 2) return out;
 
-  const head = rows[0] ?? [];
-  const body = rows.slice(1);
+  const headAt = headerRowIndex(rows);
+  const head = headAt >= 0 ? rows[headAt] : [];
+  const body = rows.slice(headAt + 1);
   const headLevels = head.filter((c) => levelFromGrade(c)).length;
   const headComponents = head.filter((c) => componentFrom(c) !== "unknown").length;
   const transposed = headLevels >= 2 && headLevels > headComponents;
@@ -237,6 +257,45 @@ function readFeePage(page: any, sourceUrl: string): any[] {
   return dedupe(found).slice(0, MAX_FINDINGS_PER_PAGE);
 }
 
+// Words that contain "fee" but are not about fees, and pages that are not where a fee is written down.
+//
+// Every one of these was picked, on a real school site, by a scorer that looked for the letters rather than the word:
+// six "infrastructure" pages matched "structure", a "parents-feedback" page matched "fee", and a shelf of payment
+// portals matched "payment". A page fetched by mistake is worse than no page at all, because it gets counted as a
+// school that has a fee page and chose to put nothing on it - which is a claim about the school, made up by us.
+const NOT_ABOUT_FEES = /feedback|feeder|coffee|infrastructure/;
+// A place to hand over money is never a place that lists what the money is. Unless it says, plainly, that it is
+// the fee structure - some schools do put the table on the payment page.
+const PLACE_TO_PAY = /\b(pay|paying|payment|payments|epay|gateway|checkout|collect|collection|login|signin|portal|transaction)\b/;
+// Nor is anything a school wrote about itself.
+const NOT_A_PAGE_AT_ALL = /\b(blog|blogs|article|articles|news|circular|circulars|gallery|event|events)\b/;
+const SAYS_FEE = /\bfees?\b/;
+const SAYS_FEE_STRUCTURE = /\bfees?\s+structure\b/;
+
+// How likely one link is to lead to a page with the fees written on it. Nought means do not follow it.
+function scoreFeeLink(text: unknown, href: unknown): number {
+  const t = tidy(text);
+  // the address read as words, so "/fee-structure", "/fees.aspx" and "/fees" all say the same thing
+  const h = String(href ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ");
+  const both = `${t} ${h}`;
+  if (NOT_ABOUT_FEES.test(both)) return 0;
+  if (NOT_A_PAGE_AT_ALL.test(h)) return 0;
+  if (PLACE_TO_PAY.test(both) && !SAYS_FEE_STRUCTURE.test(both)) return 0;
+  let score = 0;
+  if (SAYS_FEE_STRUCTURE.test(both)) score += 5;
+  if (SAYS_FEE.test(t)) score += 4;
+  if (SAYS_FEE.test(h)) score += 3;
+  if (/\btuition\b/.test(both)) score += 3;
+  if (/\bfees?\s+(schedule|details|particulars|chart|list)\b/.test(both)) score += 2;
+  // Every CBSE school must publish one, and the fee structure is on it. Usually as a PDF.
+  if (/mandatory public disclosure/.test(both)) score += 3;
+  return score;
+}
+
+// Below this, do not follow the link at all. An admissions page, or a page that merely mentions admissions, is not a
+// fee page; following it anyway is how a school ends up recorded as publishing a fee page with nothing on it.
+const FOLLOW_AT = 3;
+
 // Which link on a school's home page is most likely to lead to the fees.
 function bestFeeLink(links: Array<{ href: string; text: string }>, base: string): { page: string | null; pdf: string | null } {
   let page: string | null = null;
@@ -245,13 +304,9 @@ function bestFeeLink(links: Array<{ href: string; text: string }>, base: string)
   for (const link of links ?? []) {
     const href = String(link?.href ?? "");
     if (!href || /^(mailto:|tel:|javascript:|#)/i.test(href)) continue;
-    const text = tidy(link?.text);
     const low = href.toLowerCase();
-    let score = 0;
-    if (/\bfee/.test(text) || /fee/.test(low)) score += 4;
-    if (/structure|schedule|disclosure|payment/.test(`${text} ${low}`)) score += 2;
-    if (/admission|tuition/.test(text)) score += 1;
-    if (score === 0) continue;
+    const score = scoreFeeLink(link?.text, href);
+    if (score < FOLLOW_AT) continue;
     let absolute: string;
     try {
       absolute = new URL(href, base).href;
