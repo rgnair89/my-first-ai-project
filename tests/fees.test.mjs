@@ -18,7 +18,7 @@ const b = src.indexOf('// ==== END testable logic');
 if (a < 0 || b < 0) throw new Error('the markers are gone from crawl-school-fees/index.ts');
 
 const names = ['tidy', 'levelFromGrade', 'gradeSpansLevels', 'componentFrom', 'amountFrom', 'academicYearFrom',
-  'findingsFromTable', 'findingsFromLines', 'readFeePage', 'bestFeeLink', 'howManySchools', 'dedupe'];
+  'findingsFromTable', 'findingsFromLines', 'readFeePage', 'bestFeeLink', 'howManySchools', 'dedupe', 'outcomeOf'];
 fs.mkdirSync(path.join(here, '.tmp'), { recursive: true });
 const file = path.join(here, '.tmp', 'fee-logic.mts');
 fs.writeFileSync(file, `${src.slice(a, b)}\nexport { ${names.join(', ')} };\n`);
@@ -179,6 +179,20 @@ console.log('\n=== finding the fee page in the first place ===');
   check('...and an email address is not a page', !String(got.page).includes('mailto'));
   check('a site with nothing fee-shaped on it sends nobody anywhere', eq(L.bestFeeLink([{ href: '/about', text: 'About' }], 'https://x.in/'), { page: null, pdf: null }));
 }
+
+console.log('\n=== what reading one site came to ===');
+check('numbers on a page is the good case, whatever we went on to make of them',
+  L.outcomeOf({ found: 3, feePage: 'https://x.in/fees' }) === 'table'
+  && L.outcomeOf({ found: 1, pdf: 'https://x.in/f.pdf', feePage: 'https://x.in/fees' }) === 'table');
+check('only a PDF is the case that decides whether a PDF reader is worth writing',
+  L.outcomeOf({ found: 0, pdf: 'https://x.in/fees.pdf', feePage: 'https://x.in/fees' }) === 'pdf_only');
+check('a fee page with nothing on it is not the same as no fee page: one is the school\'s choice, the other may be ours',
+  L.outcomeOf({ found: 0, feePage: 'https://x.in/fees' }) === 'page_no_numbers'
+  && L.outcomeOf({ found: 0 }) === 'no_fee_page');
+check('a site that could not be read is counted as that, and not as a school with no fees',
+  L.outcomeOf({ failed: true, found: 0 }) === 'failed'
+  && L.outcomeOf({ failed: true, found: 3, feePage: 'https://x.in/fees' }) === 'failed');
+check('and nothing at all still gets an answer rather than a crash', L.outcomeOf({}) === 'no_fee_page' && L.outcomeOf(undefined) === 'no_fee_page');
 
 console.log('\n=== how many schools in one go ===');
 check('a sensible default, and never more than the ceiling, whatever is asked for',

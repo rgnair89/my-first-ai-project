@@ -17,6 +17,10 @@
 // money is for give a figure its meaning - "Class I to V, Tuition, 45,000" is a fee; "45,000" on its own is a number.
 // Findings with both are marked "high"; anything less is "low" and sorts to the bottom of the queue.
 //
+// It also writes one row per school into school_fee_crawls saying what reading that site actually turned up - a
+// table, only a PDF, a fee page with no numbers on it, no fee page at all, or a site that could not be read. Counting
+// those is what decides whether writing a PDF reader is worth it, and costs nothing to find out.
+//
 // POST body, all optional: { "limit": 8, "schoolIds": ["uuid", ...], "dryRun": true }
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as cheerio from "https://esm.sh/cheerio@1.0.0-rc.12";
@@ -266,6 +270,17 @@ function bestFeeLink(links: Array<{ href: string; text: string }>, base: string)
   return { page, pdf };
 }
 
+// What reading one school's site came to. The distinction that matters is between a fee page with nothing on it -
+// an enquiry form, or "please email us", which is a deliberate choice by the school - and no fee page found at all,
+// which might just as easily mean this crawler looked in the wrong place.
+function outcomeOf(what: { found?: number; pdf?: string | null; feePage?: string | null; failed?: boolean }): string {
+  if (what?.failed) return "failed";
+  if (Number(what?.found ?? 0) > 0) return "table";
+  if (what?.pdf) return "pdf_only";
+  if (what?.feePage) return "page_no_numbers";
+  return "no_fee_page";
+}
+
 function howManySchools(input: unknown): number {
   const n = Math.trunc(Number(input));
   if (!Number.isFinite(n) || n < 1) return 8;
@@ -357,8 +372,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     let written = 0;
     let confident = 0;
 
+    const outcomes: Record<string, number> = {};
     for (const school of schools) {
       const log: any = { school: school.name, website: school.website, feePage: null, pdf: null, found: 0, high: 0, status: "pending" };
+      let failed = false;
+      let feePageFound: string | null = null;
       try {
         if (!dryRun) await supabase.from("schools").update({ last_crawled_at: new Date().toISOString() }).eq("id", school.id);
 
@@ -366,6 +384,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         const $ = cheerio.load(homeHtml);
         const links = $("a").toArray().map((el) => ({ href: $(el).attr("href") ?? "", text: $(el).text() ?? "" }));
         const { page: feePage, pdf } = bestFeeLink(links, school.website);
+        feePageFound = feePage;
         log.feePage = feePage ?? school.website;
         log.pdf = pdf;
 
@@ -394,7 +413,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
           }
         }
       } catch (err) {
+        failed = true;
         log.status = "could not be read: " + (err instanceof Error ? err.message : String(err));
+      }
+
+      log.outcome = outcomeOf({ found: log.found, pdf: log.pdf, feePage: feePageFound, failed });
+      outcomes[log.outcome] = (outcomes[log.outcome] ?? 0) + 1;
+      if (!dryRun) {
+        // One row per school, replaced each time. Counting these is the whole point of keeping them.
+        await supabase.from("school_fee_crawls").upsert({
+          school_id: school.id,
+          read_at: new Date().toISOString(),
+          outcome: log.outcome,
+          fee_page: (log.feePage ?? "").slice(0, 500) || null,
+          pdf_url: (log.pdf ?? "").slice(0, 500) || null,
+          lines_found: log.found,
+          lines_confident: log.high,
+          note: String(log.status ?? "").slice(0, 300) || null,
+        }, { onConflict: "school_id" });
       }
       details.push(log);
     }
@@ -405,6 +441,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       schools: schools.length,
       findings_written: written,
       worth_looking_at: confident,
+      outcomes,
       details,
     });
   } catch (err) {

@@ -11,6 +11,7 @@ import { supabase } from '@/utils/supabase';
 import {
   LEVELS, PARTS, loadWaitingSchools, loadFindings, groupByLevel, draftFromFindings, whyNotYet,
   acceptFindings, rejectFindings, readMoreWebsites, crawlSummary, crawlNeedsAttention, rupees, levelLabel,
+  loadOutcomes, outcomeTally, outcomeLabel, whatTheNumbersSay,
 } from './fee-findings-admin';
 
 export default function FeeFindingsPanel() {
@@ -20,12 +21,15 @@ export default function FeeFindingsPanel() {
   const [drafts, setDrafts] = useState({});        // level (or 'none') -> the fee being corrected
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
+  const [lastRun, setLastRun] = useState([]);       // what the last press turned up, school by school
+  const [tally, setTally] = useState([]);           // and how every school read so far divides up
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
   useEffect(() => { refresh(); }, []);
 
   async function refresh() {
+    loadOutcomes(supabase).then((got) => { if (!got.error) setTally(got.rows); });
     const res = await loadWaitingSchools(supabase);
     setLoading(false);
     if (res.error) { setError(`Could not load the queue: ${res.error.message}`); return; }
@@ -86,10 +90,12 @@ export default function FeeFindingsPanel() {
     // A run that needs somebody to do something is not good news, and is not shown as good news.
     if (crawlNeedsAttention(res.result)) setError(crawlSummary(res.result));
     else setNotice(crawlSummary(res.result));
+    setLastRun(res.result?.details ?? []);
     await refresh();
   }
 
   const groups = groupByLevel(findings);
+  const counted = outcomeTally(tally);
 
   return (
     <div className="bg-white text-gray-900 border border-gray-200 rounded-xl shadow-sm p-6" data-testid="fee-findings-panel">
@@ -113,9 +119,54 @@ export default function FeeFindingsPanel() {
         </span>
       </div>
 
+      {/* What is on school websites, counted. This is the question the crawler is really answering. */}
+      {counted.total > 0 && (
+        <div className="mb-4 border border-gray-200 rounded-lg p-3 bg-gray-50" data-testid="fee-outcomes">
+          <p className="text-xs font-bold uppercase tracking-wide text-gray-500 mb-2">
+            Where the fees are, across {counted.total} school{counted.total === 1 ? '' : 's'} read
+          </p>
+          <div className="space-y-1">
+            {counted.rows.map((row) => (
+              <div key={row.key} data-testid={`outcome-${row.key}`} className="flex items-center gap-2 text-sm">
+                <span className="w-56 shrink-0 text-gray-700">{row.label}</span>
+                <span className="h-2 rounded bg-blue-600" style={{ width: `${Math.max(row.share, 1) * 2}px` }} />
+                <span className="font-bold text-gray-900 tabular-nums">{row.schools}</span>
+                <span className="text-gray-500">({row.share}%)</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-sm text-gray-800 mt-2 font-semibold" data-testid="fee-verdict">{whatTheNumbersSay(tally)}</p>
+        </div>
+      )}
+
       {error && <p data-testid="fee-findings-error" className="text-sm font-bold text-red-700 bg-red-50 border border-red-200 rounded p-3 mb-3">{error}</p>}
       {notice && <p data-testid="fee-findings-notice" className="text-sm font-bold text-green-700 bg-green-50 border border-green-200 rounded p-3 mb-3">{notice}</p>}
       {loading && <p className="text-sm text-gray-500">Loading...</p>}
+
+      {/* The last press, school by school, so nothing has to be taken on trust. */}
+      {lastRun.length > 0 && (
+        <details className="mb-4 border border-gray-200 rounded-lg bg-white" data-testid="fee-last-run">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-bold text-gray-700">
+            What the last {lastRun.length} website{lastRun.length === 1 ? '' : 's'} turned up
+          </summary>
+          <div className="px-3 pb-3 overflow-x-auto">
+            <table className="w-full text-xs">
+              <tbody>
+                {lastRun.map((r, i) => (
+                  <tr key={`${r.school}-${i}`} data-testid={`last-run-${i}`} className="border-t border-gray-100">
+                    <td className="py-1 pr-3 font-semibold text-gray-900 align-top">{r.school}</td>
+                    <td className="py-1 pr-3 whitespace-nowrap text-gray-700 align-top">{outcomeLabel(r.outcome)}</td>
+                    <td className="py-1 pr-3 text-gray-500 align-top">{r.status}</td>
+                    <td className="py-1 align-top">
+                      {r.pdf && <a href={r.pdf} target="_blank" rel="noreferrer" className="text-blue-700 font-bold hover:underline">PDF</a>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
 
       <div className="grid md:grid-cols-[18rem_1fr] gap-6">
         {/* the queue */}
