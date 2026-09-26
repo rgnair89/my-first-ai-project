@@ -146,6 +146,32 @@ check('...and one with nothing left to read says that instead', L.crawlSummary({
   check('a crawler that could not start is an error here, not a silent success', !!res.error && /SB_SECRET_KEY/.test(res.error.message));
 }
 
+console.log('\n=== where the fees actually are ===');
+const tallyOf = (o) => Object.entries(o).map(([outcome, schools]) => ({ outcome, schools }));
+{
+  const t = L.outcomeTally(tallyOf({ table: 10, pdf_only: 60, page_no_numbers: 20, no_fee_page: 10 }));
+  check('the counts add up, and are read in the order they matter',
+    t.total === 100 && t.rows.map((r) => r.key).join() === 'table,pdf_only,page_no_numbers,no_fee_page',
+    JSON.stringify(t.rows.map((r) => r.key)));
+  check('...each carrying its share, so a hundred schools can be judged at a glance', t.rows[1].share === 60 && t.rows[0].share === 10);
+  check('...and nothing that never happened is given a row of its own', !t.rows.some((r) => r.key === 'failed'));
+}
+check('nothing read is nothing to say', L.outcomeTally([]).total === 0 && L.whatTheNumbersSay([]) === '');
+check('a handful of schools is not a finding, and says so rather than pretending',
+  /at least 100 before drawing any conclusion/.test(L.whatTheNumbersSay(tallyOf({ table: 1, pdf_only: 7 }))),
+  L.whatTheNumbersSay(tallyOf({ table: 1, pdf_only: 7 })));
+check('most of them in a PDF is the answer that says: write the PDF reader',
+  /PDF reader would be worth writing/.test(L.whatTheNumbersSay(tallyOf({ pdf_only: 60, table: 20, no_fee_page: 20 }))),
+  L.whatTheNumbersSay(tallyOf({ pdf_only: 60, table: 20, no_fee_page: 20 })));
+check('most of them on a page is the answer that says: keep reading websites',
+  /Keep reading websites/.test(L.whatTheNumbersSay(tallyOf({ table: 55, pdf_only: 20, no_fee_page: 25 }))),
+  L.whatTheNumbersSay(tallyOf({ table: 55, pdf_only: 20, no_fee_page: 25 })));
+check('and neither of those is the answer that says: stop crawling and ask the schools',
+  /asking them through the portal/.test(L.whatTheNumbersSay(tallyOf({ table: 10, pdf_only: 15, page_no_numbers: 40, no_fee_page: 35 }))),
+  L.whatTheNumbersSay(tallyOf({ table: 10, pdf_only: 15, page_no_numbers: 40, no_fee_page: 35 })));
+check('every outcome the database allows has words a person can read',
+  ['table', 'pdf_only', 'page_no_numbers', 'no_fee_page', 'failed'].every((k) => L.outcomeLabel(k) !== k));
+
 console.log('\n=== asking the database ===');
 {
   const db = fakeDb();

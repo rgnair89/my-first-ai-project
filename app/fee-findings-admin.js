@@ -139,6 +139,51 @@ export async function rejectFindings(db, ids) {
   return { error: error ?? null };
 }
 
+// ---- what reading a website turned up --------------------------------------------------------------------------
+// The five things that can happen, in the order they are worth knowing about. "Only a PDF" is the one that decides
+// whether writing a PDF reader is worth the work: every CBSE school must publish its fees in a Mandatory Public
+// Disclosure, and that is a PDF.
+export const OUTCOMES = [
+  { key: 'table', label: 'Numbers on a page' },
+  { key: 'pdf_only', label: 'Only a PDF' },
+  { key: 'page_no_numbers', label: 'A fee page with no numbers on it' },
+  { key: 'no_fee_page', label: 'No way to the fees at all' },
+  { key: 'failed', label: 'Could not be read' },
+];
+export const outcomeLabel = (key) => OUTCOMES.find((o) => o.key === key)?.label ?? key;
+
+export async function loadOutcomes(db) {
+  const { data, error } = await db.from('fee_crawl_outcomes').select('*');
+  return { rows: data ?? [], error: error ?? null };
+}
+
+// The counts arranged the way they are read, with the total, and never a row for something that never happened.
+export function outcomeTally(rows) {
+  const by = new Map((rows ?? []).map((r) => [r.outcome, Number(r.schools ?? 0)]));
+  const total = [...by.values()].reduce((a, b) => a + b, 0);
+  return {
+    total,
+    rows: OUTCOMES.filter((o) => by.get(o.key)).map((o) => ({
+      key: o.key,
+      label: o.label,
+      schools: by.get(o.key),
+      share: total ? Math.round((by.get(o.key) / total) * 100) : 0,
+    })),
+  };
+}
+
+// The one sentence the whole exercise is for. Said only once enough schools have been read to mean anything.
+export function whatTheNumbersSay(rows, enough = 100) {
+  const tally = outcomeTally(rows);
+  if (!tally.total) return '';
+  if (tally.total < enough) return `${tally.total} schools read so far. Read at least ${enough} before drawing any conclusion from this.`;
+  const pdf = tally.rows.find((r) => r.key === 'pdf_only')?.share ?? 0;
+  const table = tally.rows.find((r) => r.key === 'table')?.share ?? 0;
+  if (pdf >= 40) return `${pdf}% of schools keep their fees in a PDF and nowhere else. A PDF reader would be worth writing.`;
+  if (table >= 40) return `${table}% publish their fees on a page. Keep reading websites; there is a lot left to collect.`;
+  return `Only ${table}% publish fees on a page and ${pdf}% in a PDF. Most schools do not publish fees at all, so asking them through the portal is the way to get these.`;
+}
+
 // ---- running the crawler ---------------------------------------------------------------------------------------------
 export async function readMoreWebsites(db, { limit = 8, dryRun = false } = {}) {
   const { data, error } = await db.functions.invoke('crawl-school-fees', { body: { limit, dryRun } });

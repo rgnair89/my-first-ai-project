@@ -86,7 +86,9 @@ with checks(ord, migration, looks_for, found) as (
          exists (select 1 from pg_extension where extname = 'pg_cron')
            and exists (select 1 from pg_extension where extname = 'pg_net')),
     (30, '20260926000100_fee_findings',                       'table school_fee_findings',
-         to_regclass('public.school_fee_findings') is not null)
+         to_regclass('public.school_fee_findings') is not null),
+    (31, '20260926000200_fee_crawl_log',                      'table school_fee_crawls',
+         to_regclass('public.school_fee_crawls') is not null)
 )
 select
   ord                                                as "#",
