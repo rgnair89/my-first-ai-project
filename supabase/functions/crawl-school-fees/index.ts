@@ -94,8 +94,9 @@ const COMPONENTS: Array<[string, RegExp]> = [
   ["deposit", /\b(deposit|caution|security|refundable)\b/],
   ["transport", /\b(transport|bus|van|conveyance)\b/],
   ["meals", /\b(meal|meals|food|lunch|canteen|mess|snack|nutrition)\b/],
-  ["uniform_books", /\b(uniform|books?|stationer|text\s?books?|kit)\b/],
-  ["activities", /\b(activit|sports?|excursion|trip|club|swim|music|dance|lab|computer)/],
+  // "books" and not "book": a preschool page offering to BOOK A SESSION was being read as a charge for textbooks.
+  ["uniform_books", /\b(uniform|books|stationer|text\s?books?)\b/],
+  ["activities", /\b(activit|sports?|excursion|trip|club|swim|music|dance|gymkhana|lab|computer)/],
   ["other_annual", /\b(development|maintenance|building|infrastructure|miscellaneous|misc|annual\s+charge|general\s+charge|amenit)/],
   ["tuition", /\b(tuition|academic|composite|school\s+fee|term\s+fee|quarterly|monthly\s+fee|annual\s+fee|session\s+fee|yearly)\b/],
 ];
@@ -133,6 +134,20 @@ function academicYearFrom(text: unknown): string | null {
   return null;
 }
 
+// Whether a table is about money at all.
+//
+// A CBSE Mandatory Public Disclosure page is mostly tables, and almost none of them are fees: the affiliation number
+// (1130325), the school code (30251) and the campus area (4887 sq mtr) all read as perfectly plausible rupee amounts.
+// A table earns a reading only if something on it says it is about fees.
+function looksLikeFees(rows: string[][]): boolean {
+  for (const row of rows ?? []) {
+    for (const cell of row ?? []) {
+      if (/\bfees?\b|\u20B9|\brs\.?\b|\binr\b|\btuition\b|\badmission\b/i.test(String(cell ?? ""))) return true;
+    }
+  }
+  return false;
+}
+
 // ---- turning one table into findings ----------------------------------------------------------------------------
 // `rows` is the table as plain strings. Two shapes are common on school sites and both are handled: classes down the
 // side with what the money is for across the top, and the other way round.
@@ -155,9 +170,14 @@ function headerRowIndex(rows: string[][]): number {
   return -1;   // no headings at all: every row is a row of the table
 }
 
-function findingsFromTable(rows: string[][], sourceUrl: string, pageYear: string | null): any[] {
+// `heading` is whatever was written immediately above the table on the page. It matters more than it sounds: the
+// commonest fee table in India is two columns - the charge and the amount - with the class in a heading above it
+// ("Nursery", "Class I to V"), one table per class. Reading only what is inside the table leaves every one of those
+// rows with no class at all, which is why 52 lines off nine real fee tables were all marked untrustworthy.
+function findingsFromTable(rows: string[][], sourceUrl: string, pageYear: string | null, heading?: unknown): any[] {
   const out: any[] = [];
-  if (!Array.isArray(rows) || rows.length < 2) return out;
+  // One row is a small fee table, not a broken one: "Tuition Fee | 90,000" says everything it needs to.
+  if (!Array.isArray(rows) || rows.length < 1) return out;
 
   const headAt = headerRowIndex(rows);
   const head = headAt >= 0 ? rows[headAt] : [];
@@ -179,13 +199,16 @@ function findingsFromTable(rows: string[][], sourceUrl: string, pageYear: string
       const gradeText = transposed ? headCell : label;
       const componentText = transposed ? label : (componentFrom(headCell) !== "unknown" ? headCell : label);
 
-      const level = levelFromGrade(gradeText);
+      // the class from the row if it is there, and from the heading above the table if it is not
+      const fromRow = levelFromGrade(gradeText);
+      const level = fromRow ?? levelFromGrade(heading);
+      const saidWhere = fromRow ? gradeText : (level ? String(heading ?? "") : gradeText);
       const component = componentFrom(componentText);
-      const unsure = level === null || component === "unknown" || gradeSpansLevels(gradeText);
+      const unsure = level === null || component === "unknown" || gradeSpansLevels(saidWhere);
 
       out.push({
         source_url: sourceUrl,
-        grade_text: String(gradeText).slice(0, 120) || null,
+        grade_text: String(saidWhere).slice(0, 120) || null,
         component_text: String(componentText).slice(0, 120) || null,
         evidence: row.join(" | ").replace(/\s+/g, " ").trim().slice(0, 400),
         level,
@@ -209,6 +232,9 @@ function findingsFromLines(lines: string[], sourceUrl: string, pageYear: string 
     if (!text || text.length > 200) continue;
     const parts = text.split(/[:–-]\s|\s{2,}/);
     if (parts.length < 2) continue;
+    // An address ending in a pincode - "Juhu, Mumbai - 400049" - was being read as a charge of four lakh. A sentence
+    // has to say "fee" before any number in it is treated as one.
+    if (!/\bfees?\b/i.test(text)) continue;
     const label = parts[0];
     const component = componentFrom(label);
     if (component === "unknown") continue;
@@ -248,8 +274,12 @@ function dedupe(findings: any[]): any[] {
 function readFeePage(page: any, sourceUrl: string): any[] {
   const pageYear = academicYearFrom(page?.text ?? "");
   const found: any[] = [];
-  for (const rows of page?.tables ?? []) {
-    for (const f of findingsFromTable(rows, sourceUrl, pageYear)) found.push(f);
+  for (const table of page?.tables ?? []) {
+    // a table is either the bare rows, or the rows with whatever was written above them
+    const rows = Array.isArray(table) ? table : table?.rows;
+    const heading = Array.isArray(table) ? "" : (table?.heading ?? "");
+    if (!Array.isArray(rows) || !looksLikeFees(rows)) continue;
+    for (const f of findingsFromTable(rows, sourceUrl, pageYear, heading)) found.push(f);
     if (found.length >= MAX_FINDINGS_PER_PAGE) break;
   }
   // Prose is a fallback, not an addition: a page with a real table has already said what it has to say.
@@ -363,17 +393,23 @@ async function requireAdmin(req: Request, admin: any, secretKey: string): Promis
 }
 
 // The HTML, reduced to the few plain things the logic above works on.
-function pageFromHtml(html: string): { tables: string[][][]; lines: string[]; text: string } {
+function pageFromHtml(html: string): { tables: Array<{ rows: string[][]; heading: string }>; lines: string[]; text: string } {
   const $ = cheerio.load(html);
   $("script, style, noscript").remove();
-  const tables: string[][][] = [];
+  const tables: Array<{ rows: string[][]; heading: string }> = [];
   for (const table of $("table").toArray()) {
     const rows: string[][] = [];
     for (const tr of $(table).find("tr").toArray()) {
       const cells = $(tr).find("th, td").toArray().map((c) => $(c).text().replace(/\s+/g, " ").trim());
       if (cells.length) rows.push(cells);
     }
-    if (rows.length >= 2) tables.push(rows);
+    if (rows.length < 2) continue;
+    // What was written immediately above this table, which is where the class usually is.
+    const above = $(table).find("caption").first().text()
+      || $(table).prevAll("h1, h2, h3, h4, h5, h6, strong, b, p").first().text()
+      || $(table).parent().prevAll("h1, h2, h3, h4, h5, h6, strong, b, p").first().text()
+      || "";
+    tables.push({ rows, heading: above.replace(/\s+/g, " ").trim().slice(0, 160) });
   }
   const lines: string[] = [];
   for (const el of $("li, p, dd, dt").toArray()) {
