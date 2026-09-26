@@ -37,7 +37,29 @@ export function sweepSize(bounds, step = STEP) {
 export const STEP = 0.03; // about 3.3 km
 export const BATCH_SIZE = 6; // cells per function call (the function accepts at most 8)
 export const MAX_DEPTH = 3; // a crowded cell is split into quarters at most 3 times (about 400 m)
-export const MAX_REQUESTS = 2000; // hard stop on Google requests for one sweep
+export const MAX_REQUESTS = 2000; // the old flat ceiling, kept as the floor of a city's own budget
+
+// Roughly what one Google request costs at list price, for telling somebody what they are about to spend.
+export const COST_PER_REQUEST = 0.035;
+
+// How many Google requests a city should be allowed before it stops and asks.
+//
+// A flat 2,000 was right when there was one city. Pune needs 300 and would never reach it; Mumbai is 1,360 cells and
+// would hit it two thirds of the way through, then stop every 500 requests to ask permission to carry on - four
+// interruptions, each one a chance to lose track of whether the sweep finished. The budget is now the size of the
+// job: Pune measured 2.5 requests per cell, so three per cell plus a margin covers a city with denser corners,
+// and anything past that is a runaway rather than a big city.
+export function budgetFor(cells, perCell = 3) {
+  const n = Math.max(0, Math.trunc(Number(cells) || 0));
+  return Math.max(MAX_REQUESTS, Math.ceil(n * perCell * 1.2));
+}
+
+// What a sweep of this size is likely to cost, as a range, in whole dollars.
+export function costRange(cells) {
+  const low = Math.round(cells * 2 * COST_PER_REQUEST);
+  const high = Math.round(cells * 3 * COST_PER_REQUEST);
+  return { low, high };
+}
 export const BUDGET_TOP_UP = 500; // extra requests the admin can approve after the limit is reached
 
 const r5 = (n) => Math.round(n * 1e5) / 1e5;

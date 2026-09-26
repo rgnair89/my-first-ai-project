@@ -5,7 +5,7 @@ import { supabase } from '@/utils/supabase';
 import {
   buildGrid, testCells, runSweep, emptyTotals, mergeTotals, serializeState, restoreState,
   loadSweepCities, sweepSize,
-  makeLock, lockedByOtherTab, MAX_REQUESTS, BUDGET_TOP_UP,
+  makeLock, lockedByOtherTab, MAX_REQUESTS, BUDGET_TOP_UP, budgetFor, costRange,
 } from './sweep';
 
 const STATE_KEY = 'kidscover.sweep.v1'; // unfinished sweep, so a refresh resumes instead of starting over
@@ -105,9 +105,10 @@ export default function SweepPanel() {
       fresh &&
       !window.confirm(
         `This starts the full grid sweep of ${city?.name ?? cityKey}.\n\n` +
-          `${size.cells} cells, so roughly ${size.cells}-${size.cells * 2} Google Places requests ` +
-          `(about $${Math.round(size.cells * 0.035)}-${Math.round(size.cells * 0.07)} at list price). ` +
-          `It stops by itself at ${MAX_REQUESTS} requests. If the page is refreshed it resumes where it left off.\n\nContinue?`,
+          `${size.cells} cells, so roughly ${size.cells * 2}-${size.cells * 3} Google Places requests ` +
+          `(about $${costRange(size.cells).low}-${costRange(size.cells).high} at list price). ` +
+          `It stops by itself at ${budgetFor(size.cells)} requests, which is enough to finish this city once. ` +
+          `If the page is refreshed it resumes where it left off, and you can stop it after any batch.\n\nContinue?`,
       )
     ) {
       return;
@@ -120,8 +121,8 @@ export default function SweepPanel() {
     if (fresh) {
       queue.current = buildGrid(city?.bounds);
       done.current = emptyTotals();
-      budget.current = MAX_REQUESTS;
-      setLimit(MAX_REQUESTS);
+      budget.current = budgetFor(size.cells);
+      setLimit(budget.current);
       setProgress(null);
     }
     setRestored(false);

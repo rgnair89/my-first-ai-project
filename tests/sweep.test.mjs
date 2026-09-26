@@ -60,5 +60,30 @@ check('a city smaller than one trial gives every cell it has, rather than none',
   L.testCells(L.buildGrid(L.boundsOf(PUNE_ROW)).slice(0, 3)).length === 3);
 check('...and nothing at all gives nothing, without throwing', L.testCells([]).length === 0 && L.testCells(null).length === 0);
 
+console.log('\n=== what a sweep is allowed to spend ===');
+{
+  const pune = L.buildGrid(L.boundsOf(PUNE_ROW)).length;
+  const mumbai = L.buildGrid(L.boundsOf(MUMBAI_ROW)).length;
+  // A flat ceiling was right for one city. Mumbai is eleven times Pune and would have stopped two thirds of the way
+  // through, then asked permission every 500 requests - four interruptions, each one a chance to lose track of
+  // whether the sweep ever finished.
+  check('a big city is given enough to finish in one go, rather than stopping two thirds of the way through',
+    L.budgetFor(mumbai) > mumbai * 3, `${L.budgetFor(mumbai)} for ${mumbai} cells`);
+  check('...and a small one keeps the old floor, so nothing got cheaper by accident',
+    L.budgetFor(pune) === L.MAX_REQUESTS && L.budgetFor(20) === L.MAX_REQUESTS);
+  check('...while a runaway is still stopped: the budget is a multiple of the work, not a blank cheque',
+    L.budgetFor(mumbai) < mumbai * 5, String(L.budgetFor(mumbai)));
+  check('nonsense asks for the floor rather than for infinity',
+    L.budgetFor(null) === L.MAX_REQUESTS && L.budgetFor('lots') === L.MAX_REQUESTS && L.budgetFor(-5) === L.MAX_REQUESTS);
+}
+{
+  // Pune really cost 300 requests, about ten dollars. The range is shown to somebody before they press the button,
+  // so it has to bracket what actually happened rather than flatter it.
+  const c = L.costRange(L.buildGrid(L.boundsOf(PUNE_ROW)).length);
+  check('the cost shown before a sweep brackets what Pune really cost', c.low <= 10 && c.high >= 10, JSON.stringify(c));
+  check('...and a city eleven times the size is shown a much bigger number',
+    L.costRange(1360).low > c.low * 8, JSON.stringify(L.costRange(1360)));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
